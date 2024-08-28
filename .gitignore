@@ -1,17 +1,5 @@
 # Default ignored files
 /.idea/
 /shelf/
-/workspace.xml
-# Editor-based HTTP Client requests
-/httpRequests/
-# Datasource local storage ignored files
-/dataSources/
-/dataSources.local.xml
 /models/
 /my_files
-/misc.xml
-/modules.xml
-/MyTranscribber.iml
-/inspectionProfiles/profiles_settings.xml
-/vcs.xml
-
