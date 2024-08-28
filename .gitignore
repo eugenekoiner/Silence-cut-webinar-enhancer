@@ -1,4 +1,5 @@
 # Default ignored files
+/.idea/
 /shelf/
 /workspace.xml
 # Editor-based HTTP Client requests
@@ -6,7 +7,7 @@
 # Datasource local storage ignored files
 /dataSources/
 /dataSources.local.xml
-/models
+/models/
 /my_files
 /misc.xml
 /modules.xml
