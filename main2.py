@@ -74,12 +74,14 @@ def load_model():
 
 # Функция для получения громкости аудио
 def get_audio_loudness(input_path):
+    print('Определяем общую громкость файла')
     command = [
         'ffmpeg', '-i', input_path,
         '-af', 'ebur128', '-f', 'null', '-'
     ]
     result = subprocess.run(command, stderr=subprocess.PIPE, universal_newlines=True)
     loudness_log = result.stderr
+    print('вот такой результат: ', result)
 
     match = re.search(r'Integrated loudness:\s*(-?\d+\.\d+)', loudness_log)
     if match:
@@ -95,6 +97,7 @@ def calculate_silence_threshold(loudness, offset_dB=-10):
 
 # Функция для анализа аудио и извлечения данных о тишине
 def analyze_audio(input_path):
+    print('Определяем участки с тишиной')
     loudness = get_audio_loudness(input_path)
     if loudness is None:
         raise RuntimeError("Не удалось определить громкость аудиофайла.")
@@ -103,7 +106,7 @@ def analyze_audio(input_path):
     silence_threshold_str = f"{silence_threshold}dB"
 
     command = [
-        'ffmpeg', '-loglevel', 'quiet', '-i', input_path,
+        'ffmpeg', '-i', input_path,
         '-af', f'silencedetect=n={silence_threshold_str}:d=0.5',
         '-f', 'null', '-'
     ]
