@@ -1,9 +1,15 @@
 import os
 import time
+import threading
 import whisper
 import subprocess
 import torch
 import re
+import warnings
+
+model_name = "medium"
+speed_factor = 1.25
+offset_dB = 30
 
 # Определим пути для всех файлов относительно папки скрипта
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -18,6 +24,7 @@ os.makedirs(SOURCE_DIR, exist_ok=True)
 os.makedirs(TEMP_DIR, exist_ok=True)
 os.makedirs(OUTPUT_DIR, exist_ok=True)
 
+warnings.filterwarnings("ignore", category=FutureWarning)
 
 # Функция для очистки временных файлов
 def cleanup(temp_files):
@@ -58,7 +65,7 @@ def start_timer(stop_event):
     while not stop_event.is_set():
         elapsed_time = time.time() - start_time
         formatted_time = time.strftime("%H:%M:%S", time.gmtime(elapsed_time))
-        print(f"Прошло времени: {formatted_time}", end="\r")  # Обновляем в той же строке
+        print(f"{formatted_time}", end="\r")
         time.sleep(1)
 
 
@@ -66,49 +73,48 @@ def start_timer(stop_event):
 def load_model():
     # Определяем устройство: CPU или GPU
     device = "cuda" if torch.cuda.is_available() else "cpu"
+    print("Подготовка к транскрибации.")
     print(f"Транскрибация будет выполняться на {device}.")
-    print("Загрузка модели Whisper...")
-    model = whisper.load_model("medium", download_root=MODEL_DIR, device=device)
+    print(f"Инициализация Whisper. Модель \"{model_name}\".")
+    model = whisper.load_model(model_name, download_root=MODEL_DIR, device=device)
     return model
 
 
 # Функция для получения порога тишины
 def get_silence_threshold(input_path):
-    print('Определяем порог тишины файла')
     command = [
-        'ffmpeg', '-loglevel', 'quiet', '-i', input_path,
+        'ffmpeg', '-i', input_path,
         '-af', 'ebur128', '-f', 'null', '-'
     ]
     result = subprocess.run(command, stderr=subprocess.PIPE, universal_newlines=True)
     loudness_log = result.stderr
 
     # Регулярное выражение для извлечения порога тишины
-    match = re.search(r'Threshold:\s*(-?\d+\.\d+)\s*LUFS', loudness_log)
-    print('МАТЧ!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!: ', match)
-    print(match.group(1))
+    match = re.search(r'Integrated loudness:[\s\S]*?Threshold:\s*(-?\d+\.\d+)\s*LUFS', loudness_log)
+    print('Порог тишины в видео: ', match.group(1))
     if match:
         return float(match.group(1))
     else:
         print("Не удалось найти 'Threshold' в логах.")
         return None
 
+
 # Функция для вычисления порога тишины
-def calculate_silence_threshold(loudness, offset_dB=-10):
+def calculate_silence_threshold(loudness):
     return loudness + offset_dB
 
 
 # Функция для анализа аудио и извлечения данных о тишине
 def analyze_audio(input_path):
-    print('Определяем участки с тишиной')
     loudness = get_silence_threshold(input_path)
     if loudness is None:
-        raise RuntimeError("Не удалось определить порог тишины аудиофайла.")
+        raise RuntimeError("Не удалось определить порог тишины файла.")
 
     silence_threshold = calculate_silence_threshold(loudness)
     silence_threshold_str = f"{silence_threshold}dB"
 
     command = [
-        'ffmpeg', '-loglevel', 'quiet', '-i', input_path,
+        'ffmpeg', '-i', input_path,
         '-af', f'silencedetect=n={silence_threshold_str}:d=0.5',
         '-f', 'null', '-'
     ]
@@ -147,6 +153,7 @@ def remove_silence_using_metadata(input_path, silence_intervals, output_path):
         'ffmpeg', '-loglevel', 'quiet', '-i', input_path,
         '-vf', f"select='not({filter_complex})',setpts=N/FRAME_RATE/TB",
         '-af', f"aselect='not({filter_complex})',asetpts=N/SR/TB",
+        '-b:v', '5000k',
         output_path
     ]
 
@@ -182,7 +189,7 @@ def main():
         temp_srt = os.path.join(OUTPUT_DIR, video_file_name.split('.')[0] + "_output.srt")
 
         # Анализируем аудио для получения данных о тишине
-        print("Анализ аудио для удаления тишины...")
+        print("Подготовка к удалению тишины...")
         silence_intervals = analyze_audio(video_path)
 
         # Удаляем тишину (с учетом видео и аудио)
@@ -193,22 +200,18 @@ def main():
         model = load_model()
 
         # Запуск таймера в отдельном потоке
-        import threading
-        stop_event = threading.Event()
-        timer_thread = threading.Thread(target=start_timer, args=(stop_event,))
-        timer_thread.start()
+        try:
+            stop_event = threading.Event()
+            print("Транскрибация...")
+            timer_thread = threading.Thread(target=start_timer, args=(stop_event,))
+            timer_thread.start()
+            segments = transcribe_audio(model, temp_no_silence_video)
+        finally:
+            stop_event.set()
+            timer_thread.join()
 
-        # Транскрибируем аудио из промежуточного файла (без изменения скорости)
-        print("Выполняется транскрибация...")
-        segments = transcribe_audio(model, temp_no_silence_video)
-
-        # Останавливаем таймер
-        stop_event.set()
-        timer_thread.join()
         print("\nТранскрибация завершена.")
-
         # Планируем изменение скорости
-        speed_factor = 1.25
 
         # Корректируем таймкоды субтитров с учетом будущего ускорения
         adjusted_segments = adjust_subtitles(segments, speed_factor)
@@ -221,12 +224,13 @@ def main():
                 srt_file.write(f"{i}\n{start_time} --> {end_time}\n{text}\n\n")
 
         # Ускоряем видео с учетом фактора скорости
-        print("Ускорение видео и аудио...")
+        print(f"Ускорение видео в {speed_factor}...")
         speed_up_video(temp_no_silence_video, final_video_path, speed_factor)
 
         print(f"Видео готово и сохранено по пути: {final_video_path}")
         print(f"Субтитры сохранены по пути: {temp_srt}")
-
+    except KeyboardInterrupt:
+        print("\nПрервано пользователем.")
     except Exception as e:
         print(f"Произошла ошибка: {e}")
     finally:
