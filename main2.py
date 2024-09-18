@@ -76,19 +76,22 @@ def load_model():
 def get_audio_loudness(input_path):
     print('Определяем общую громкость файла')
     command = [
-        'ffmpeg', '-i', input_path,
+        'ffmpeg', '-loglevel', 'quiet', '-i', input_path,
         '-af', 'ebur128', '-f', 'null', '-'
     ]
     result = subprocess.run(command, stderr=subprocess.PIPE, universal_newlines=True)
     loudness_log = result.stderr
-    print('вот такой результат: ', result)
+    print(loudness_log)
 
-    match = re.search(r'Integrated loudness:\s*(-?\d+\.\d+)', loudness_log)
+    # Обновленное регулярное выражение для извлечения громкости
+    match = re.search(r'Integrated loudness:\s*I:\s*(-?\d+\.\d+)\s*LUFS', loudness_log)
+    print('МАТЧ!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!: ', match)
+    print(match.group(1))
     if match:
         return float(match.group(1))
     else:
-        raise RuntimeError("Не удалось определить громкость аудиофайла.")
-
+        print("Не удалось найти 'Integrated loudness' в логах.")
+        return None
 
 # Функция для вычисления порога тишины
 def calculate_silence_threshold(loudness, offset_dB=-10):
@@ -106,7 +109,7 @@ def analyze_audio(input_path):
     silence_threshold_str = f"{silence_threshold}dB"
 
     command = [
-        'ffmpeg', '-i', input_path,
+        'ffmpeg', '-loglevel', 'quiet', '-i', input_path,
         '-af', f'silencedetect=n={silence_threshold_str}:d=0.5',
         '-f', 'null', '-'
     ]
@@ -130,7 +133,16 @@ def analyze_audio(input_path):
 
 # Функция для удаления тишины, основываясь на данных о тишине
 def remove_silence_using_metadata(input_path, silence_intervals, output_path):
+    if not silence_intervals:
+        print("Нет участков тишины для удаления.")
+        return
+
+    # Создаем фильтр для удаления тишины
     filter_complex = ''.join([f"between(t,{start},{end})+" for start, end in silence_intervals])[:-1]
+
+    # Проверяем, что фильтр не пустой
+    if not filter_complex:
+        raise ValueError("Фильтр для удаления тишины пустой.")
 
     command = [
         'ffmpeg', '-loglevel', 'quiet', '-i', input_path,
@@ -138,7 +150,12 @@ def remove_silence_using_metadata(input_path, silence_intervals, output_path):
         '-af', f"aselect='not({filter_complex})',asetpts=N/SR/TB",
         output_path
     ]
-    subprocess.run(command, check=True)
+
+    try:
+        subprocess.run(command, check=True)
+    except subprocess.CalledProcessError as e:
+        print(f"Ошибка при выполнении ffmpeg: {e}")
+        raise
 
 
 # Функция для изменения скорости видео и аудио
