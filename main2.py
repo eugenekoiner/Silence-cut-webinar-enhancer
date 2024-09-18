@@ -1,4 +1,5 @@
 import os
+import json
 import time
 import threading
 import whisper
@@ -6,11 +7,13 @@ import subprocess
 import torch
 import re
 import warnings
+from tqdm import tqdm
 
-model_name = "medium"
-speed_factor = 1.25
-offset_dB = -3
-silence_gap = 0.5
+# Определяем глобальные переменные
+model_name = None
+speed_factor = None
+offset_dB = None
+silence_gap = None
 
 # Определим пути для всех файлов относительно папки скрипта
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -18,14 +21,61 @@ MODEL_DIR = os.path.join(SCRIPT_DIR, '.models')
 SOURCE_DIR = os.path.join(SCRIPT_DIR, '.source')
 TEMP_DIR = os.path.join(SCRIPT_DIR, '.temp')
 OUTPUT_DIR = os.path.join(SCRIPT_DIR, '.output')
+CONFIG_DIR = os.path.join(SCRIPT_DIR, '.config')
+CONFIG_FILE = os.path.join(CONFIG_DIR, 'config.json')
 
 # Создаем директории, если они не существуют
 os.makedirs(MODEL_DIR, exist_ok=True)
 os.makedirs(SOURCE_DIR, exist_ok=True)
 os.makedirs(TEMP_DIR, exist_ok=True)
 os.makedirs(OUTPUT_DIR, exist_ok=True)
+os.makedirs(OUTPUT_DIR, exist_ok=True)
+os.makedirs(CONFIG_DIR, exist_ok=True)
 
 warnings.filterwarnings("ignore", category=FutureWarning)
+
+def initialize_params():
+    global model_name, speed_factor, offset_dB, silence_gap
+    # Дефолтные параметры
+    DEFAULT_MODEL_NAME = "medium"
+    DEFAULT_SPEED_FACTOR = 1.25
+    DEFAULT_OFFSET_DB = -3
+    DEFAULT_SILENCE_GAP = 0.5
+
+    if os.path.exists(CONFIG_FILE):
+        print(f"Загрузка конфигурации из файла {CONFIG_FILE}...")
+        with open(CONFIG_FILE, 'r') as f:
+            config = json.load(f)
+        model_name = config.get('model_name', DEFAULT_MODEL_NAME)
+        speed_factor = config.get('speed_factor', DEFAULT_SPEED_FACTOR)
+        offset_dB = config.get('offset_dB', DEFAULT_OFFSET_DB)
+        silence_gap = config.get('silence_gap', DEFAULT_SILENCE_GAP)
+    else:
+        print("Конфигурационный файл не найден. Введите параметры вручную.")
+        model_name = input(f"Введите название модели (по умолчанию '{DEFAULT_MODEL_NAME}'): ") or DEFAULT_MODEL_NAME
+        speed_factor = input(f"Во сколько вы хотите ускорить видео (1 если ускорение не нужно, по умолчанию {DEFAULT_SPEED_FACTOR}): ")
+        speed_factor = float(speed_factor) if speed_factor else DEFAULT_SPEED_FACTOR
+        offset_dB = input(f"Настройки чувствительности тишины ({DEFAULT_OFFSET_DB} по умолчанию): ")
+        offset_dB = float(offset_dB) if offset_dB else DEFAULT_OFFSET_DB
+        silence_gap = input(f"Настройки ожидания тишины ({DEFAULT_SILENCE_GAP} по умолчанию): ")
+        silence_gap = float(silence_gap) if silence_gap else DEFAULT_SILENCE_GAP
+
+        config = {
+            'model_name': model_name,
+            'speed_factor': speed_factor,
+            'offset_dB': offset_dB,
+            'silence_gap': silence_gap
+        }
+        os.makedirs(os.path.dirname(CONFIG_FILE), exist_ok=True)
+        with open(CONFIG_FILE, 'w') as f:
+            json.dump(config, f, indent=4)
+
+    print(f"Текущая модель: {model_name}")
+    print(f"Текущий коэффициент ускорения: {speed_factor}")
+    print(f"Текущий порог чувствительности: {offset_dB}")
+    print(f"Текущий интервал тишины: {silence_gap}")
+
+    return model_name, speed_factor, offset_dB, silence_gap
 
 # Функция для очистки временных файлов
 def cleanup(temp_files):
@@ -142,6 +192,14 @@ def analyze_audio(input_path):
     return silence_intervals
 
 
+def get_video_duration(input_path):
+    """Получаем общую длительность видео с помощью ffprobe."""
+    command = [
+        'ffprobe', '-v', 'error', '-show_entries', 'format=duration',
+        '-of', 'default=noprint_wrappers=1:nokey=1', input_path
+    ]
+    result = subprocess.run(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, universal_newlines=True)
+    return float(result.stdout.strip())
 
 # Функция для удаления тишины, основываясь на данных о тишине
 def remove_silence_using_metadata(input_path, silence_intervals, output_path):
@@ -156,16 +214,47 @@ def remove_silence_using_metadata(input_path, silence_intervals, output_path):
     if not filter_complex:
         raise ValueError("Фильтр для удаления тишины пустой.")
 
+    # Получаем общую длительность видео
+    total_duration = get_video_duration(input_path)
+    total_duration_ms = total_duration * 1000000  # в миллисекундах
+
     command = [
         'ffmpeg', '-loglevel', 'quiet', '-i', input_path,
         '-vf', f"select='not({filter_complex})',setpts=N/FRAME_RATE/TB",
         '-af', f"aselect='not({filter_complex})',asetpts=N/SR/TB",
         '-b:v', '5000k',
+        '-progress', 'pipe:1',
         output_path
     ]
 
     try:
-        subprocess.run(command, check=True)
+        process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, universal_newlines=True)
+        pbar = tqdm(total=100, desc="Удаление тишины", unit="%")
+
+        # Временные переменные для точности прогресса
+        last_percent = 0
+
+        for line in process.stdout:
+            if 'out_time_ms=' in line:
+                try:
+                    time_ms = int(line.split('=')[1].strip())
+                    # print('NOW: ', time_ms)
+                    # print('TOTAL', total_duration_ms)
+                    percentage = (time_ms / total_duration_ms) * 100
+                    percentage = min(100, round(percentage))  # Ограничиваем до 100%
+
+                    # Обновляем прогресс-бар только если процент изменился
+                    if percentage > last_percent:
+                        pbar.update(percentage - last_percent)
+                        last_percent = percentage
+
+                except ValueError:
+                    continue  # Игнорируем строки с ошибками
+
+        process.wait()
+        pbar.update(100 - last_percent)  # Завершаем прогресс-бар
+
+
     except subprocess.CalledProcessError as e:
         print(f"Ошибка при выполнении ffmpeg: {e}")
         raise
@@ -184,6 +273,7 @@ def speed_up_video(input_path, output_path, speed_factor):
 
 # Основной скрипт
 def main():
+    initialize_params()
     try:
         video_file_name = input("Введите название видеофайла (с расширением): ")
         video_path = os.path.join(SOURCE_DIR, video_file_name)
@@ -198,7 +288,6 @@ def main():
         # Анализируем аудио для получения данных о тишине
         print("Подготовка к удалению тишины...")
         silence_intervals = analyze_audio(video_path)
-        print('Интервалс: ', silence_intervals)
 
         # Удаляем тишину (с учетом видео и аудио)
         print("Удаление тишины из видео...")
@@ -244,7 +333,6 @@ def main():
     finally:
         clear_cache()
         print("Все временные файлы удалены.")
-
 
 if __name__ == "__main__":
     main()
