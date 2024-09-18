@@ -72,25 +72,24 @@ def load_model():
     return model
 
 
-# Функция для получения громкости аудио
-def get_audio_loudness(input_path):
-    print('Определяем общую громкость файла')
+# Функция для получения порога тишины
+def get_silence_threshold(input_path):
+    print('Определяем порог тишины файла')
     command = [
         'ffmpeg', '-loglevel', 'quiet', '-i', input_path,
         '-af', 'ebur128', '-f', 'null', '-'
     ]
     result = subprocess.run(command, stderr=subprocess.PIPE, universal_newlines=True)
     loudness_log = result.stderr
-    print(loudness_log)
 
-    # Обновленное регулярное выражение для извлечения громкости
-    match = re.search(r'Integrated loudness:\s*I:\s*(-?\d+\.\d+)\s*LUFS', loudness_log)
+    # Регулярное выражение для извлечения порога тишины
+    match = re.search(r'Threshold:\s*(-?\d+\.\d+)\s*LUFS', loudness_log)
     print('МАТЧ!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!: ', match)
     print(match.group(1))
     if match:
         return float(match.group(1))
     else:
-        print("Не удалось найти 'Integrated loudness' в логах.")
+        print("Не удалось найти 'Threshold' в логах.")
         return None
 
 # Функция для вычисления порога тишины
@@ -101,9 +100,9 @@ def calculate_silence_threshold(loudness, offset_dB=-10):
 # Функция для анализа аудио и извлечения данных о тишине
 def analyze_audio(input_path):
     print('Определяем участки с тишиной')
-    loudness = get_audio_loudness(input_path)
+    loudness = get_silence_threshold(input_path)
     if loudness is None:
-        raise RuntimeError("Не удалось определить громкость аудиофайла.")
+        raise RuntimeError("Не удалось определить порог тишины аудиофайла.")
 
     silence_threshold = calculate_silence_threshold(loudness)
     silence_threshold_str = f"{silence_threshold}dB"
