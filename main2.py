@@ -71,11 +71,38 @@ def load_model():
     return model
 
 
+# Функция для получения громкости аудио
+def get_audio_loudness(input_path):
+    command = [
+        'ffmpeg', '-i', input_path,
+        '-af', 'ebur128', '-f', 'null', '-'
+    ]
+    result = subprocess.run(command, stderr=subprocess.PIPE, universal_newlines=True)
+    loudness_log = result.stderr
+
+    for line in loudness_log.split('\n'):
+        if 'Integrated loudness' in line:
+            return float(line.split()[-2])
+    return None
+
+
+# Функция для вычисления порога тишины
+def calculate_silence_threshold(loudness, offset_dB=-10):
+    return loudness + offset_dB
+
+
 # Функция для анализа аудио и извлечения данных о тишине
 def analyze_audio(input_path):
+    loudness = get_audio_loudness(input_path)
+    if loudness is None:
+        raise RuntimeError("Не удалось определить громкость аудиофайла.")
+
+    silence_threshold = calculate_silence_threshold(loudness)
+    silence_threshold_str = f"{silence_threshold}dB"
+
     command = [
         'ffmpeg', '-loglevel', 'quiet', '-i', input_path,
-        '-af', 'silencedetect=n=-50dB:d=0.5',
+        '-af', f'silencedetect=n={silence_threshold_str}:d=0.5',
         '-f', 'null', '-'
     ]
     result = subprocess.run(command, stderr=subprocess.PIPE, universal_newlines=True)
@@ -129,7 +156,6 @@ def main():
             raise FileNotFoundError("Файл не найден. Проверьте путь и имя файла в папке .source.")
 
         # Промежуточные файлы
-        temp_metadata = os.path.join(TEMP_DIR, "silence_metadata.txt")
         temp_no_silence_video = os.path.join(TEMP_DIR, "temp_no_silence.mp4")
         final_video_path = os.path.join(OUTPUT_DIR, video_file_name.split('.')[0] + "_output.mp4")
         temp_srt = os.path.join(OUTPUT_DIR, video_file_name.split('.')[0] + "_output.srt")
