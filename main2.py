@@ -9,7 +9,8 @@ import warnings
 
 model_name = "medium"
 speed_factor = 1.25
-offset_dB = 30
+offset_dB = -3
+silence_gap = 0.5
 
 # Определим пути для всех файлов относительно папки скрипта
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -91,7 +92,7 @@ def get_silence_threshold(input_path):
 
     # Регулярное выражение для извлечения порога тишины
     match = re.search(r'Integrated loudness:[\s\S]*?Threshold:\s*(-?\d+\.\d+)\s*LUFS', loudness_log)
-    print('Порог тишины в видео: ', match.group(1))
+    print('Порог тишины в видео: ', float(match.group(1))+offset_dB)
     if match:
         return float(match.group(1))
     else:
@@ -115,7 +116,7 @@ def analyze_audio(input_path):
 
     command = [
         'ffmpeg', '-i', input_path,
-        '-af', f'silencedetect=n={silence_threshold_str}:d=0.5',
+        '-af', f'silencedetect=n={silence_threshold_str}:d={silence_gap}',
         '-f', 'null', '-'
     ]
     result = subprocess.run(command, stderr=subprocess.PIPE, universal_newlines=True)
@@ -125,15 +126,21 @@ def analyze_audio(input_path):
     start_time = None
 
     for line in silence_log.split('\n'):
-        if 'silence_start' in line:
-            start_time = float(line.split()[-1])
-        if 'silence_end' in line:
-            end_time = float(line.split()[-1])
+        start_match = re.search(r'silence_start:\s*([\d.]+)', line)
+        if start_match:
+            start_time = float(start_match.group(1))
+        end_match = re.search(r'silence_end:\s*([\d.]+)', line)
+        if end_match:
+            end_time = float(end_match.group(1))
             if start_time is not None:
-                silence_intervals.append((start_time, end_time))
+                if end_time >= start_time:
+                    silence_intervals.append((start_time, end_time))
+                else:
+                    print(f"Invalid interval detected: start_time={start_time}, end_time={end_time}")
                 start_time = None
 
     return silence_intervals
+
 
 
 # Функция для удаления тишины, основываясь на данных о тишине
@@ -191,6 +198,7 @@ def main():
         # Анализируем аудио для получения данных о тишине
         print("Подготовка к удалению тишины...")
         silence_intervals = analyze_audio(video_path)
+        print('Интервалс: ', silence_intervals)
 
         # Удаляем тишину (с учетом видео и аудио)
         print("Удаление тишины из видео...")
