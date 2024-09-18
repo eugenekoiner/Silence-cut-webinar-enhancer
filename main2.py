@@ -3,6 +3,7 @@ import time
 import whisper
 import subprocess
 import torch
+import re
 
 # Определим пути для всех файлов относительно папки скрипта
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -80,10 +81,11 @@ def get_audio_loudness(input_path):
     result = subprocess.run(command, stderr=subprocess.PIPE, universal_newlines=True)
     loudness_log = result.stderr
 
-    for line in loudness_log.split('\n'):
-        if 'Integrated loudness' in line:
-            return float(line.split()[-2])
-    return None
+    match = re.search(r'Integrated loudness:\s*(-?\d+\.\d+)', loudness_log)
+    if match:
+        return float(match.group(1))
+    else:
+        raise RuntimeError("Не удалось определить громкость аудиофайла.")
 
 
 # Функция для вычисления порога тишины
