@@ -70,11 +70,6 @@ def initialize_params():
         with open(CONFIG_FILE, 'w') as f:
             json.dump(config, f, indent=4)
 
-    print(f"Текущая модель: {model_name}")
-    print(f"Текущий коэффициент ускорения: {speed_factor}")
-    print(f"Текущий порог чувствительности: {offset_dB}")
-    print(f"Текущий интервал тишины: {silence_gap}")
-
     return model_name, speed_factor, offset_dB, silence_gap
 
 # Функция для очистки временных файлов
@@ -130,21 +125,48 @@ def load_model():
     model = whisper.load_model(model_name, download_root=MODEL_DIR, device=device)
     return model
 
+# Функция для чтения stderr в отдельном потоке
+def read_stderr(process, log_container):
+    while True:
+        output = process.stderr.readline()
+        if output == '' and process.poll() is not None:
+            break
+        if output:
+            log_container.append(output)
 
 # Функция для получения порога тишины
 def get_silence_threshold(input_path):
     command = [
         'ffmpeg', '-i', input_path,
-        '-af', 'ebur128', '-f', 'null', '-'
+        '-af', 'ebur128', '-f', 'null', '-',
+        '-progress', 'pipe:1'
     ]
-    result = subprocess.run(command, stderr=subprocess.PIPE, universal_newlines=True)
-    loudness_log = result.stderr
+    message = "Определение порога тишины"
+    process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, universal_newlines=True)
+
+    # Лог для stderr
+    loudness_log = []
+
+    # Запускаем поток для чтения stderr
+    stderr_thread = threading.Thread(target=read_stderr, args=(process, loudness_log))
+    stderr_thread.start()
+
+    # Отображаем прогресс
+    ffmpeg_progress(process, get_video_duration(input_path), message)
+
+    # Дожидаемся завершения потока stderr
+    stderr_thread.join()
+
+    # Объединяем все строки из stderr в один лог
+    loudness_log_str = ''.join(loudness_log)
 
     # Регулярное выражение для извлечения порога тишины
-    match = re.search(r'Integrated loudness:[\s\S]*?Threshold:\s*(-?\d+\.\d+)\s*LUFS', loudness_log)
-    print('Порог тишины в видео: ', float(match.group(1))+offset_dB)
+    match = re.search(r'Integrated loudness:[\s\S]*?Threshold:\s*(-?\d+\.\d+)\s*LUFS', loudness_log_str)
+
     if match:
-        return float(match.group(1))
+        threshold = float(match.group(1))
+        print('Порог тишины в видео: ', threshold)
+        return threshold
     else:
         print("Не удалось найти 'Threshold' в логах.")
         return None
@@ -167,15 +189,31 @@ def analyze_audio(input_path):
     command = [
         'ffmpeg', '-i', input_path,
         '-af', f'silencedetect=n={silence_threshold_str}:d={silence_gap}',
-        '-f', 'null', '-'
+        '-f', 'null', '-',
+        '-progress', 'pipe:1'
     ]
-    result = subprocess.run(command, stderr=subprocess.PIPE, universal_newlines=True)
-    silence_log = result.stderr
+    process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, universal_newlines=True)
+
+    # Лог для stderr
+    silence_log = []
+
+    # Запускаем поток для чтения stderr
+    stderr_thread = threading.Thread(target=read_stderr, args=(process, silence_log))
+    stderr_thread.start()
+
+    # Отображаем прогресс
+    ffmpeg_progress(process, get_video_duration(input_path), "Поиск отрезков тишины")
+
+    # Дожидаемся завершения потока stderr
+    stderr_thread.join()
+
+    # Объединяем все строки из stderr в один лог
+    silence_log_str = ''.join(silence_log)
 
     silence_intervals = []
     start_time = None
 
-    for line in silence_log.split('\n'):
+    for line in silence_log_str.split('\n'):
         start_match = re.search(r'silence_start:\s*([\d.]+)', line)
         if start_match:
             start_time = float(start_match.group(1))
@@ -191,45 +229,9 @@ def analyze_audio(input_path):
 
     return silence_intervals
 
-
-def get_video_duration(input_path):
-    """Получаем общую длительность видео с помощью ffprobe."""
-    command = [
-        'ffprobe', '-v', 'error', '-show_entries', 'format=duration',
-        '-of', 'default=noprint_wrappers=1:nokey=1', input_path
-    ]
-    result = subprocess.run(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, universal_newlines=True)
-    return float(result.stdout.strip())
-
-# Функция для удаления тишины, основываясь на данных о тишине
-def remove_silence_using_metadata(input_path, silence_intervals, output_path):
-    if not silence_intervals:
-        print("Нет участков тишины для удаления.")
-        return
-
-    # Создаем фильтр для удаления тишины
-    filter_complex = ''.join([f"between(t,{start},{end})+" for start, end in silence_intervals])[:-1]
-
-    # Проверяем, что фильтр не пустой
-    if not filter_complex:
-        raise ValueError("Фильтр для удаления тишины пустой.")
-
-    # Получаем общую длительность видео
-    total_duration = get_video_duration(input_path)
-    total_duration_ms = total_duration * 1000000  # в миллисекундах
-
-    command = [
-        'ffmpeg', '-loglevel', 'quiet', '-i', input_path,
-        '-vf', f"select='not({filter_complex})',setpts=N/FRAME_RATE/TB",
-        '-af', f"aselect='not({filter_complex})',asetpts=N/SR/TB",
-        '-b:v', '5000k',
-        '-progress', 'pipe:1',
-        output_path
-    ]
-
+def ffmpeg_progress(process, total_duration_ms, message):
     try:
-        process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, universal_newlines=True)
-        pbar = tqdm(total=100, desc="Удаление тишины", unit="%")
+        pbar = tqdm(total=100, desc=message, unit="%")
 
         # Временные переменные для точности прогресса
         last_percent = 0
@@ -238,8 +240,6 @@ def remove_silence_using_metadata(input_path, silence_intervals, output_path):
             if 'out_time_ms=' in line:
                 try:
                     time_ms = int(line.split('=')[1].strip())
-                    # print('NOW: ', time_ms)
-                    # print('TOTAL', total_duration_ms)
                     percentage = (time_ms / total_duration_ms) * 100
                     percentage = min(100, round(percentage))  # Ограничиваем до 100%
 
@@ -259,6 +259,39 @@ def remove_silence_using_metadata(input_path, silence_intervals, output_path):
         print(f"Ошибка при выполнении ffmpeg: {e}")
         raise
 
+def get_video_duration(input_path):
+    command = [
+        'ffprobe', '-v', 'error', '-show_entries', 'format=duration',
+        '-of', 'default=noprint_wrappers=1:nokey=1', input_path
+    ]
+    result = float(subprocess.run(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, universal_newlines=True).stdout.strip()) * 1000000  # в миллисекундах
+    return result
+
+# Функция для удаления тишины, основываясь на данных о тишине
+def remove_silence_using_metadata(input_path, silence_intervals, output_path):
+    if not silence_intervals:
+        print("Нет участков тишины для удаления.")
+        return
+
+    # Создаем фильтр для удаления тишины
+    filter_complex = ''.join([f"between(t,{start},{end})+" for start, end in silence_intervals])[:-1]
+
+    # Проверяем, что фильтр не пустой
+    if not filter_complex:
+        raise ValueError("Фильтр для удаления тишины пустой.")
+
+    command = [
+        'ffmpeg', '-loglevel', 'quiet', '-i', input_path,
+        '-vf', f"select='not({filter_complex})',setpts=N/FRAME_RATE/TB",
+        '-af', f"aselect='not({filter_complex})',asetpts=N/SR/TB",
+        '-b:v', '5000k',
+        '-progress', 'pipe:1',
+        output_path
+    ]
+
+    process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, universal_newlines=True)
+    message = "Удаление тишины"
+    ffmpeg_progress(process, get_video_duration(input_path), message)
 
 # Функция для изменения скорости видео и аудио
 def speed_up_video(input_path, output_path, speed_factor):
@@ -266,10 +299,12 @@ def speed_up_video(input_path, output_path, speed_factor):
         'ffmpeg', '-loglevel', 'quiet', '-i', input_path,
         '-filter:v', f'setpts={1 / speed_factor}*PTS',
         '-filter:a', f'atempo={speed_factor}',
+        '-progress', 'pipe:1',
         output_path
     ]
-    subprocess.run(command, check=True)
-
+    process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, universal_newlines=True) # subprocess.run(command, check=True)
+    message = "Ускорение видео"
+    ffmpeg_progress(process, get_video_duration(input_path), message)
 
 # Основной скрипт
 def main():
@@ -286,11 +321,9 @@ def main():
         temp_srt = os.path.join(OUTPUT_DIR, video_file_name.split('.')[0] + "_output.srt")
 
         # Анализируем аудио для получения данных о тишине
-        print("Подготовка к удалению тишины...")
         silence_intervals = analyze_audio(video_path)
 
         # Удаляем тишину (с учетом видео и аудио)
-        print("Удаление тишины из видео...")
         remove_silence_using_metadata(video_path, silence_intervals, temp_no_silence_video)
 
         # Загружаем модель для транскрибации
@@ -321,11 +354,9 @@ def main():
                 srt_file.write(f"{i}\n{start_time} --> {end_time}\n{text}\n\n")
 
         # Ускоряем видео с учетом фактора скорости
-        print(f"Ускорение видео в {speed_factor}...")
         speed_up_video(temp_no_silence_video, final_video_path, speed_factor)
 
-        print(f"Видео готово и сохранено по пути: {final_video_path}")
-        print(f"Субтитры сохранены по пути: {temp_srt}")
+        print("Готово!")
     except KeyboardInterrupt:
         print("\nПрервано пользователем.")
     except Exception as e:
