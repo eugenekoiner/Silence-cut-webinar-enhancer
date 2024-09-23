@@ -270,7 +270,9 @@ def get_video_duration(input_path):
 # Функция для удаления тишины, основываясь на данных о тишине
 def remove_silence_using_metadata(input_path, silence_intervals, output_path):
     if not silence_intervals:
-        print("Нет участков тишины для удаления.")
+        print("Тишина не найдена. Используется исходное видео.")
+        command = ['ffmpeg', '-loglevel', 'quiet', '-i', input_path, '-c', 'copy', output_path]
+        subprocess.run(command, check=True)
         return
 
     # Создаем фильтр для удаления тишины
