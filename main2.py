@@ -33,17 +33,18 @@ os.makedirs(CONFIG_DIR, exist_ok=True)
 warnings.filterwarnings("ignore", category=FutureWarning)
 temp_no_silence_video = None
 final_video_path = None
+video_file_name = None
 
 
 def initialize_params():
-    global model_name, speed_factor, offset_dB, silence_gap, total_duration
+    global model_name, speed_factor, offset_dB, silence_gap
     DEFAULT_MODEL_NAME = "medium"
     DEFAULT_SPEED_FACTOR = 1.25
     DEFAULT_OFFSET_DB = 0
     DEFAULT_SILENCE_GAP = 0.3
 
     if os.path.exists(CONFIG_FILE):
-        print(f"Загрузка конфигурации из файла {CONFIG_FILE}...")
+        print(f"Загрузка конфигурации из файла {os.path.basename(CONFIG_FILE)}...")
         with open(CONFIG_FILE, 'r') as f:
             config = json.load(f)
         model_name = config.get('model_name', DEFAULT_MODEL_NAME)
@@ -78,8 +79,6 @@ def clear_cache():
                 shutil.rmtree(path) if os.path.isdir(path) else os.unlink(path)
             except Exception as e:
                 print(f'Ошибка при удалении {path}: {e}')
-    else:
-        print(f"Папка {TEMP_VIDEO_DIR} существует. Очистка не требуется.")
 
 # Пересчет таймкодов субтитров с учетом будущего изменения скорости
 def adjust_subtitles(segments, speed_factor):
@@ -144,7 +143,7 @@ def get_silence_threshold(input_path):
 def analyze_audio(input_path):
     if os.path.exists(temp_no_silence_video):
         return
-    intervals_file_path = os.path.join(TEMP_VIDEO_DIR, 'non_silence_intervals.txt')
+    intervals_file_path = os.path.join(TEMP_VIDEO_DIR, f'{video_file_name.split('.')[0]}_non_silence_intervals.txt')
     if os.path.exists(intervals_file_path):
         with open(intervals_file_path, 'r') as f:
             non_silence_intervals = json.load(f)
@@ -268,7 +267,7 @@ def split_video_by_points(input_path, split_points):
         command = [
             'ffmpeg', '-loglevel', 'quiet', '-i', input_path,
             '-ss', str(start)
-        ] + (['-to', str(end)] if end else []) + ['-c', 'copy', '-c:v', 'h264_nvenc', '-b:v', '5000k', '-preset', 'fast', '-threads', '0', output_path, output_chunk]
+        ] + (['-to', str(end)] if end else []) + ['-c', 'copy', '-c:v', 'h264_nvenc', '-b:v', '3m', '-preset', 'fast', '-threads', '0', output_path, output_chunk]
         subprocess.run(command, check=True)
         temp_files.append(output_chunk)
     return temp_files
@@ -304,7 +303,7 @@ def remove_silence_using_metadata(input_path, non_silence_intervals, output_path
         raise ValueError("Фильтр для удаления тишины пустой.")
     concat_inputs = ''.join([f"[v{idx}][a{idx}]" for idx in range(len(non_silence_intervals))])
     filter_complex += f"{concat_inputs}concat=n={len(non_silence_intervals)}:v=1:a=1[v][a]"
-    filter_file_path = os.path.join(TEMP_VIDEO_DIR, "silence_filter.txt")
+    filter_file_path = os.path.join(TEMP_VIDEO_DIR, f'{video_file_name.split('.')[0]}_silence_filter.txt')
     with open(filter_file_path, 'w') as f:
         f.write(filter_complex)
     command = [
@@ -312,7 +311,7 @@ def remove_silence_using_metadata(input_path, non_silence_intervals, output_path
         '-filter_complex_script', filter_file_path,  # Используем правильный способ
         '-map', '[v]', '-map', '[a]',
         '-c:v', 'h264_nvenc',
-        '-b:v', '5000k',
+        '-b:v', '3m',
         '-preset', 'fast',
         '-threads', '0',
         '-progress', 'pipe:1',
@@ -355,7 +354,7 @@ def concat_chunks(chunks, output_path):
 # Функция для изменения скорости видео и аудио
 def speed_up_video(input_path, output_path, speed_factor):
     if os.path.exists(output_path):
-        print(f"Финальный файл {os.path.basename(output_path)} уже готов.")
+        print(f"Финальный файл {os.path.basename(output_path)} уже существует.")
         return
     command = [
         'ffmpeg', '-loglevel', 'quiet', '-i', input_path,
@@ -386,18 +385,19 @@ def main():
     global TEMP_VIDEO_DIR
     global temp_no_silence_video
     global final_video_path
+    global video_file_name
     video_file_name = input("Введите название видеофайла (с расширением): ")
     final_video_path = os.path.join(OUTPUT_DIR, video_file_name.split('.')[0] + "_output.mp4")
     final_srt_path = os.path.join(OUTPUT_DIR, video_file_name.split('.')[0] + "_output.srt")
     if os.path.exists(final_video_path) and os.path.exists(final_srt_path):
-        print(f"Финальный файл {os.path.basename(final_video_path)} уже готов.")
+        print(f"Финальный файл {os.path.basename(final_video_path)} уже существует.")
         return
     TEMP_VIDEO_DIR = os.path.join(TEMP_DIR, video_file_name.split(".")[0])
     clear_cache()
     os.makedirs(TEMP_VIDEO_DIR, exist_ok=True)
     video_path = os.path.join(SOURCE_DIR, video_file_name)
     try:
-        temp_no_silence_video = os.path.join(TEMP_VIDEO_DIR, "final_no_silence.mp4")
+        temp_no_silence_video = os.path.join(TEMP_VIDEO_DIR, f'{video_file_name.split('.')[0]}_final_no_silence.mp4')
         if not os.path.exists(video_path):
             raise FileNotFoundError("Файл не найден. Проверьте путь и имя файла в папке .source.")
         print('Длительность видео', datetime.timedelta(seconds=int(get_video_duration_in_seconds(video_path))))
