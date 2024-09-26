@@ -140,21 +140,27 @@ def get_silence_threshold(input_path):
         return None
 
 
-def analyze_audio(input_path):
-    if os.path.exists(temp_no_silence_video):
-        return
-    intervals_file_path = os.path.join(TEMP_VIDEO_DIR, f'{video_file_name.split('.')[0]}_non_silence_intervals.txt')
+def analyze_audio(input_path, save_name=None, get_non_silence=True):
+    if save_name is None:
+        save_name = os.path.basename(input_path).split(".")[0]
+    # Определяем нужный файл для интервалов
+    interval_type = 'non_silence' if get_non_silence else 'silence'
+    intervals_file_path = os.path.join(TEMP_VIDEO_DIR, f'{save_name}_{interval_type}_intervals.txt')
+    # Если файл с интервалами существует, загружаем данные из него
     if os.path.exists(intervals_file_path):
         with open(intervals_file_path, 'r') as f:
-            non_silence_intervals = json.load(f)
-        print("Интервалы загружены из файла.")
-        return non_silence_intervals
+            intervals = json.load(f)
+        print(f"Интервалы {interval_type} загружены из файла {intervals_file_path}.")
+        return intervals
 
+    # Определение порога тишины
     loudness = get_silence_threshold(input_path)
     if loudness is None:
         raise RuntimeError("Не удалось определить порог тишины файла.")
     silence_threshold = loudness + offset_dB
-    print('Порог тишины в видео: ', f"{round(silence_threshold, 2)} dB")
+    print(f'Порог тишины: {round(silence_threshold, 2)} dB')
+
+    # Запуск ffmpeg для анализа тишины
     command = [
         'ffmpeg', '-i', input_path,
         '-af', f'silencedetect=n={silence_threshold}dB:d={silence_gap}',
@@ -163,12 +169,12 @@ def analyze_audio(input_path):
     ]
     process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, universal_newlines=True)
     silence_log = []
-    stderr_thread = threading.Thread(target=read_stderr, args=(process, silence_log))
-    stderr_thread.start()
+    threading.Thread(target=read_stderr, args=(process, silence_log)).start()
     ffmpeg_progress(process, get_video_duration_in_seconds(input_path), "Поиск отрезков тишины")
-    stderr_thread.join()
+
+    # Обработка результатов
     silence_log_str = ''.join(silence_log)
-    non_silence_intervals = []
+    silence_intervals, non_silence_intervals = [], []
     start_time = 0.0
 
     for line in silence_log_str.split('\n'):
@@ -176,22 +182,24 @@ def analyze_audio(input_path):
         if start_match:
             end_time = float(start_match.group(1))
             non_silence_intervals.append((start_time, end_time))
-            start_time = None  # Сбрасываем start_time для следующего куска тишины
+            silence_intervals.append((end_time, None))
 
         end_match = re.search(r'silence_end:\s*([\d.]+)', line)
         if end_match:
             start_time = float(end_match.group(1))
+            if silence_intervals and silence_intervals[-1][1] is None:
+                silence_intervals[-1] = (silence_intervals[-1][0], start_time)
 
-    # Добавляем последний отрезок, если он существует
     if start_time is not None:
         non_silence_intervals.append((start_time, get_video_duration_in_seconds(input_path)))
 
-    # Сохраняем интервалы в файл
+    # Сохраняем и возвращаем нужные интервалы
+    intervals = non_silence_intervals if get_non_silence else silence_intervals
     with open(intervals_file_path, 'w') as f:
-        json.dump(non_silence_intervals, f)
+        json.dump(intervals, f)
+    return intervals
 
 
-    return non_silence_intervals
 
 
 def calculate_remaining_duration(non_silence_intervals):
@@ -263,23 +271,22 @@ def split_video_by_points(input_path, split_points):
     points = [0] + split_points  # Добавляем начало видео как первую точку
     for i, start in enumerate(points, 1):  # Нумерация начинается с 1
         end = split_points[i - 1] if i <= len(split_points) else None
-        output_chunk = os.path.join(TEMP_DIR, f"chunk_{i}.mp4")
+        output_chunk = os.path.join(TEMP_VIDEO_DIR, f"{video_file_name.split('.')[0]}_chunk_{i}.mp4")
         command = [
             'ffmpeg', '-loglevel', 'quiet', '-i', input_path,
             '-ss', str(start)
-        ] + (['-to', str(end)] if end else []) + ['-c', 'copy', '-c:v', 'h264_nvenc', '-b:v', '3m', '-preset', 'fast', '-threads', '0', output_path, output_chunk]
+        ] + (['-to', str(end)] if end else []) + ['-c', 'copy', '-b:v', '2000k', output_chunk]
         subprocess.run(command, check=True)
         temp_files.append(output_chunk)
     return temp_files
 
-# Пересчитываем интервалы тишины для каждого фрагмента
-def adjust_silence_intervals_for_chunks(silence_intervals, split_points):
-    chunk_silence_intervals = []
-    for i, start in enumerate(split_points):
-        end = split_points[i + 1] if i + 1 < len(split_points) else None
-        chunk_intervals = [(s - start, e - start) for s, e in silence_intervals if start <= s < (end or float('inf'))]
-        chunk_silence_intervals.append(chunk_intervals)
-    return chunk_silence_intervals
+def get_chunks_non_silence_intervals(video_chunks):
+    chunk_non_silence_intervals = []
+    for i, chunk_path in enumerate(video_chunks):
+        non_silence_intervals = analyze_audio(chunk_path)
+        chunk_non_silence_intervals.append(non_silence_intervals)
+
+    return chunk_non_silence_intervals
 
 def remove_silence_using_metadata(input_path, non_silence_intervals, output_path):
 
@@ -310,10 +317,7 @@ def remove_silence_using_metadata(input_path, non_silence_intervals, output_path
         'ffmpeg', '-loglevel', 'error', '-i', input_path,
         '-filter_complex_script', filter_file_path,  # Используем правильный способ
         '-map', '[v]', '-map', '[a]',
-        '-c:v', 'h264_nvenc',
-        '-b:v', '3m',
-        '-preset', 'fast',
-        '-threads', '0',
+        '-b:v', '2m',
         '-progress', 'pipe:1',
         output_path
     ]
@@ -331,12 +335,12 @@ def remove_silence_using_metadata(input_path, non_silence_intervals, output_path
 
 
 # Удаление тишины по кусочкам
-def remove_silence_from_chunks(chunks, non_silence_intervals_list):
+def remove_silence_from_chunks(chunks, chunks_non_silence_intervals):
     processed_chunks = []
     for i, chunk in enumerate(chunks):
         output_chunk = os.path.join(TEMP_DIR, f"chunk_no_silence_{i + 1}.mp4")
-        non_silence_intervals = non_silence_intervals_list[i]
-        remove_silence_using_metadata(chunk, non_silence_intervals, output_chunk)
+        chunk_non_silence_intervals = chunks_non_silence_intervals[i]
+        remove_silence_using_metadata(chunk, chunk_non_silence_intervals, output_chunk)
         processed_chunks.append(output_chunk)
     return processed_chunks
 
@@ -402,14 +406,11 @@ def main():
             raise FileNotFoundError("Файл не найден. Проверьте путь и имя файла в папке .source.")
         print('Длительность видео', datetime.timedelta(seconds=int(get_video_duration_in_seconds(video_path))))
         if get_video_duration_in_seconds(video_path) > 20*60:
-            aprox_silence_intervals = analyze_audio(video_path)
+            aprox_silence_intervals = analyze_audio(video_path, get_non_silence=False)
             split_points = split_video_on_silence(video_path, aprox_silence_intervals)
             video_chunks = split_video_by_points(video_path, split_points)
-            # Пересчитываем интервалы тишины для каждого куска
-            chunk_silence_intervals = adjust_silence_intervals_for_chunks(aprox_silence_intervals, split_points)
-            # Удаляем тишину из каждого куска
-            non_silence_chunks = remove_silence_from_chunks(video_chunks, chunk_silence_intervals)
-            # Соединяем куски без тишины в один файл
+            chunks_non_silence_intervals = get_chunks_non_silence_intervals(video_chunks)
+            non_silence_chunks = remove_silence_from_chunks(video_chunks, chunks_non_silence_intervals)
             concat_chunks(non_silence_chunks, temp_no_silence_video)
         else:
             non_silence_intervals = analyze_audio(video_path)
