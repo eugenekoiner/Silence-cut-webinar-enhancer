@@ -35,7 +35,6 @@ os.makedirs(CONFIG_DIR, exist_ok=True)
 warnings.filterwarnings("ignore", category=FutureWarning)
 temp_no_silence_video = None
 final_video_path = None
-final_srt_path = None
 video_file_name = None
 
 
@@ -290,12 +289,16 @@ def concatenate_chunks():
     output_file = os.path.join(TEMP_VIDEO_DIR, f"{video_file_name.split('.')[0]}_final_no_silence.mp4")
     if os.path.exists(output_file):
         return output_file
-    video_chunks = get_chunks()
+    chunk_pattern = re.compile(rf"{re.escape(video_file_name.split('.')[0])}_chunk_(\d+)_no_silence\.mp4")
+    video_chunks = sorted([
+        os.path.join(TEMP_VIDEO_DIR, f) for f in os.listdir(TEMP_VIDEO_DIR)
+        if chunk_pattern.match(f)
+    ], key=lambda x: int(chunk_pattern.search(x).group(1)))
     if not video_chunks:
         raise FileNotFoundError(
             f"Видео файлы по шаблону {video_file_name.split('.')[0]}_chunk_*_no_silence.mp4 не найдены в {TEMP_VIDEO_DIR}.")
 
-    concat_file_path = os.path.join(TEMP_VIDEO_DIR, f'{video_file_name.split('.')[0]}_concat_list.txt')
+    concat_file_path = os.path.join(TEMP_VIDEO_DIR, f'{video_file_name}_concat_list.txt')
     if not os.path.exists(concat_file_path):
         with open(concat_file_path, 'w') as concat_file:
             for chunk in video_chunks:
@@ -321,16 +324,6 @@ def concatenate_chunks():
                 print(f"Файл {os.path.basename(output_file)} удален из-за ошибки.")
 
     return output_file
-
-
-def get_chunks():
-    chunk_pattern = re.compile(rf"{re.escape(video_file_name.split('.')[0])}_chunk_(\d+)_no_silence\.mp4")
-    video_chunks = sorted([
-        os.path.join(TEMP_VIDEO_DIR, f) for f in os.listdir(TEMP_VIDEO_DIR)
-        if chunk_pattern.match(f)
-    ], key=lambda x: int(chunk_pattern.search(x).group(1)))
-    return video_chunks
-
 
 def remove_silence_using_metadata(input_path, output_path, TEMP_VIDEO_DIR):
     if os.path.exists(output_path):
@@ -392,106 +385,6 @@ def remove_silence_from_chunks(chunks):
         for future in as_completed(futures):
             idx = futures[future]
             processed_chunks[idx] = future.result()
-    return processed_chunks
-
-
-
-def transcribe_chunk(chunk_path, temp_srt_path, model, speed_factor):
-    if os.path.exists(temp_srt_path):
-        print(f"Транскрипция для {os.path.basename(chunk_path)} уже существует.")
-        return
-
-    print(f"Транскрибирование {os.path.basename(chunk_path)}...")
-    segments = model.transcribe(chunk_path, language="ru")
-    adjusted_segments = adjust_subtitles(segments['segments'], speed_factor)
-
-    with open(temp_srt_path, 'w') as srt_file:
-        for i, (start, end, text) in enumerate(adjusted_segments, start=1):
-            start_time = time.strftime("%H:%M:%S", time.gmtime(start))
-            end_time = time.strftime("%H:%M:%S", time.gmtime(end))
-            srt_file.write(f"{i}\n{start_time} --> {end_time}\n{text}\n\n")
-
-    print(f"Файл субтитров для {os.path.basename(chunk_path)} сохранен как {os.path.basename(temp_srt_path)}.")
-    torch.cuda.empty_cache()
-
-
-def transcribe_chunks_in_parallel():
-    video_chunks = get_chunks()
-    model = load_model()
-    with ProcessPoolExecutor(max_workers=adaptive_worker_count()) as executor:
-        futures = [
-            executor.submit(
-                transcribe_chunk,
-                chunk,
-                os.path.join(TEMP_VIDEO_DIR, f"{os.path.basename(chunk).split('.')[0]}_temp_srt.txt"),
-                model, speed_factor
-            )
-            for chunk in video_chunks
-        ]
-        for future in as_completed(futures):
-            future.result()
-
-    print("Все фрагменты транскрибированы.")
-
-
-def concatenate_srt_files():
-    video_chunks = get_chunks()
-    with open(final_srt_path, 'w') as final_srt:
-        subtitle_counter = 1
-        accumulated_time = 0.0
-        for chunk in video_chunks:
-            temp_srt_path = os.path.join(TEMP_VIDEO_DIR, f"{os.path.basename(chunk).split('.')[0]}_temp_srt.txt")
-            chunk_duration = get_video_duration_in_seconds(chunk) / speed_factor
-            if os.path.exists(temp_srt_path):
-                with open(temp_srt_path, 'r') as temp_srt:
-                    for line in temp_srt:
-                        if '-->' in line:
-                            times = line.strip().split(' --> ')
-                            start_time = add_time_to_timestamp(times[0], accumulated_time)
-                            end_time = add_time_to_timestamp(times[1], accumulated_time)
-                            final_srt.write(f"{subtitle_counter}\n{start_time} --> {end_time}\n")
-                            subtitle_counter += 1
-                        else:
-                            final_srt.write(line)
-            else:
-                print(f"SRT файл для {os.path.basename(chunk)} не найден.")
-
-            accumulated_time += chunk_duration
-
-    print(f"Финальный файл субтитров сохранен как {os.path.basename(final_srt_path)}.")
-
-def add_time_to_timestamp(timestamp, accumulated_time):
-    h, m, s = map(float, timestamp.split(":"))
-    total_seconds = h * 3600 + m * 60 + s + accumulated_time
-    return time.strftime("%H:%M:%S", time.gmtime(total_seconds))
-
-
-def get_available_gpu_memory():
-    if torch.cuda.is_available():
-        torch.cuda.set_per_process_memory_fraction(0.9, 0)
-        reserved_memory_MB = torch.cuda.memory_reserved(0) / (1024 ** 2)
-        print(f"Зарезервированная память: {reserved_memory_MB:.2f} MB")
-        return reserved_memory_MB
-    else:
-        print("CUDA недоступна.")
-        return None
-
-def adaptive_worker_count():
-    reserved_memory_MB = get_available_gpu_memory()
-    if reserved_memory_MB is None:
-        return 1
-    if reserved_memory_MB > 10000:
-        return 12
-    elif reserved_memory_MB > 8000:
-        return 10
-    elif reserved_memory_MB > 6000:
-        return 8
-    elif reserved_memory_MB > 4000:
-        return 6
-    elif reserved_memory_MB > 2000:
-        return 3
-    else:
-        return 1
 
 def speed_up_video(input_path, output_path, speed_factor):
     if os.path.exists(output_path):
@@ -525,7 +418,6 @@ def main():
     global TEMP_VIDEO_DIR
     global temp_no_silence_video
     global final_video_path
-    global final_srt_path
     global video_file_name
     video_file_name = input("Введите название видеофайла (с расширением): ")
     final_video_path = os.path.join(OUTPUT_DIR, video_file_name.split('.')[0] + "_output.mp4")
@@ -548,8 +440,6 @@ def main():
             video_chunks = split_video_by_points(video_path, split_points)
             get_chunks_non_silence_intervals(video_chunks)
             remove_silence_from_chunks(video_chunks)
-            transcribe_chunks_in_parallel()
-            concatenate_srt_files()
             concatenate_chunks()
         else:
             analyze_audio(video_path)
