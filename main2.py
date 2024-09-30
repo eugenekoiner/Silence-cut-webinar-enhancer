@@ -572,18 +572,19 @@ def main():
     global final_video_path
     global final_srt_path
     global video_file_name
-    video_file_name = input("Введите название видеофайла (с расширением): ")
-    start_time = time.time()
-    final_video_path = os.path.join(OUTPUT_DIR, video_file_name.split('.')[0] + "_output.mp4")
-    final_srt_path = os.path.join(OUTPUT_DIR, video_file_name.split('.')[0] + "_output.srt")
-    if os.path.exists(final_video_path) and os.path.exists(final_srt_path):
-        print(f"Финальный файл {os.path.basename(final_video_path)} уже существует.")
-        return
-    TEMP_VIDEO_DIR = os.path.join(TEMP_DIR, video_file_name.split(".")[0])
-    clear_cache()
-    os.makedirs(TEMP_VIDEO_DIR, exist_ok=True)
-    video_path = os.path.join(SOURCE_DIR, video_file_name)
     try:
+        video_file_name = input("Введите название видеофайла (с расширением): ")
+        start_time = time.time()
+        final_video_path = os.path.join(OUTPUT_DIR, video_file_name.split('.')[0] + "_output.mp4")
+        final_srt_path = os.path.join(OUTPUT_DIR, video_file_name.split('.')[0] + "_output.srt")
+        if os.path.exists(final_video_path) and os.path.exists(final_srt_path):
+            print(f"Финальный файл {os.path.basename(final_video_path)} уже существует.")
+            return
+        TEMP_VIDEO_DIR = os.path.join(TEMP_DIR, video_file_name.split(".")[0])
+        clear_cache()
+        os.makedirs(TEMP_VIDEO_DIR, exist_ok=True)
+        video_path = os.path.join(SOURCE_DIR, video_file_name)
+
         temp_no_silence_video = os.path.join(TEMP_VIDEO_DIR, f'{video_file_name.split('.')[0]}_final_no_silence.mp4')
         if not os.path.exists(video_path):
             raise FileNotFoundError("Файл не найден. Проверьте путь и имя файла в папке .source.")
