@@ -43,10 +43,10 @@ continue_counter = 0
 
 def initialize_params():
     global model_name, speed_factor, offset_dB, silence_gap
-    DEFAULT_MODEL_NAME = "medium"
+    DEFAULT_MODEL_NAME = "base"
     DEFAULT_SPEED_FACTOR = 1.25
-    DEFAULT_OFFSET_DB = 0
-    DEFAULT_SILENCE_GAP = 0.3
+    DEFAULT_OFFSET_DB = 1
+    DEFAULT_SILENCE_GAP = 0.5
 
     if os.path.exists(CONFIG_FILE):
         print(f"Загрузка конфигурации из файла {os.path.basename(CONFIG_FILE)}...")
