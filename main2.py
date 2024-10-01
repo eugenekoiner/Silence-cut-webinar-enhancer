@@ -85,23 +85,11 @@ def clear_cache():
             except Exception as e:
                 print(f'Ошибка при удалении {path}: {e}')
 
-
-def start_timer(stop_event, message):
-    start_time = time.time()
-    while not stop_event.is_set():
-        elapsed_time = time.time() - start_time
-        formatted_time = time.strftime("%H:%M:%S", time.gmtime(elapsed_time))
-        print(message, f"{formatted_time}", end="\r")
-        time.sleep(1)
-    print(message, formatted_time)
-
-def adjust_subtitles(segments, speed_factor):
-    adjusted_segments = []
-    for segment in segments:
-        start = round(segment['start'] / speed_factor, 2)
-        end = round(segment['end'] / speed_factor, 2)
-        adjusted_segments.append((start, end, segment['text']))
-    return adjusted_segments
+def onetime_print():
+    global continue_counter
+    if continue_counter == 0:
+        print('Продолжаем с места последней остановки.')
+        continue_counter += 1
 
 def load_model():
     device = "cuda" if torch.cuda.is_available() else "cpu"
@@ -116,6 +104,14 @@ def read_stderr(process, log_container):
             break
         if output:
             log_container.append(output)
+
+def adjust_subtitles(segments, speed_factor):
+    adjusted_segments = []
+    for segment in segments:
+        start = round(segment['start'] / speed_factor, 2)
+        end = round(segment['end'] / speed_factor, 2)
+        adjusted_segments.append((start, end, segment['text']))
+    return adjusted_segments
 
 def get_silence_threshold(input_path):
     threshold_file_path = os.path.join(TEMP_VIDEO_DIR, f"{os.path.splitext(os.path.basename(input_path))[0]}_threshold.txt")
@@ -155,7 +151,7 @@ def analyze_audio(input_path, save_name=None, get_non_silence=True):
     interval_type = 'non_silence' if get_non_silence else 'silence'
     intervals_file_path = os.path.join(TEMP_VIDEO_DIR, f'{save_name}_{interval_type}_intervals.txt')
     if os.path.exists(intervals_file_path):
-        continue_print()
+        onetime_print()
         with open(intervals_file_path, 'r') as f:
             intervals = json.load(f)
         return intervals
@@ -166,7 +162,6 @@ def analyze_audio(input_path, save_name=None, get_non_silence=True):
     silence_threshold = loudness + offset_dB
     print(f'Порог тишины: {round(silence_threshold, 2)} dB')
 
-    # Запуск ffmpeg для анализа тишины
     command = [
         'ffmpeg', '-i', input_path,
         '-af', f'silencedetect=n={silence_threshold}dB:d={silence_gap}',
@@ -178,7 +173,6 @@ def analyze_audio(input_path, save_name=None, get_non_silence=True):
     threading.Thread(target=read_stderr, args=(process, silence_log)).start()
     ffmpeg_progress(process, get_video_duration_in_seconds(input_path), "Поиск отрезков тишины")
 
-    # Обработка результатов
     silence_log_str = ''.join(silence_log)
     silence_intervals, non_silence_intervals = [], []
     start_time = 0.0
@@ -202,12 +196,6 @@ def analyze_audio(input_path, save_name=None, get_non_silence=True):
     with open(intervals_file_path, 'w') as f:
         json.dump(intervals, f)
     return intervals
-
-def continue_print():
-    global continue_counter
-    if continue_counter == 0:
-        print('Продолжаем с места последней остановки.')
-        continue_counter += 1
 
 def calculate_remaining_duration(non_silence_intervals):
     remaining_duration = 0
@@ -236,17 +224,6 @@ def ffmpeg_progress(process, total_duration_seconds, message):
     except subprocess.CalledProcessError as e:
         print(f"Ошибка при выполнении ffmpeg: {e}")
         raise
-
-def progress_bar(chunks, message):
-    last_percent = 0
-    pbar = tqdm(total=100, desc=message, unit="%")
-    percentage = (chunks_ready / chunks.size()) * 100
-    percentage = min(100, round(percentage))
-    if percentage > last_percent:
-        pbar.update(percentage - last_percent)
-        last_percent = percentage
-    pbar.update(100 - last_percent)
-
 
 def get_video_duration_in_seconds(input_path):
     command = [
@@ -318,7 +295,7 @@ def concatenate_chunks():
     output_file = os.path.join(TEMP_VIDEO_DIR, f"{os.path.splitext(video_file_name)[0]}_final_no_silence.mp4")
     if os.path.exists(output_file):
         return output_file
-    video_chunks = get_chunks()
+    video_chunks = get_silence_chunks()
     if not video_chunks:
         raise FileNotFoundError(
             f"Видео файлы по шаблону {os.path.splitext(video_file_name)[0]}_chunk_*_no_silence.mp4 не найдены в {TEMP_VIDEO_DIR}.")
@@ -350,7 +327,7 @@ def concatenate_chunks():
 
     return output_file
 
-def get_chunks():
+def get_silence_chunks():
     if get_video_duration_in_seconds(video_path) > 20*60:
         chunk_pattern = re.compile(rf"{re.escape(os.path.splitext(video_file_name)[0])}_chunk_(\d+)_no_silence\.mp4")
         video_chunks = sorted([
@@ -360,12 +337,6 @@ def get_chunks():
         return video_chunks
     else:
         return [temp_no_silence_video]
-
-def timer_thread(start_time, stop_event, progress_bar):
-    while not stop_event.is_set():
-        elapsed_time = time.time() - start_time
-        progress_bar.set_postfix_str(f"Прошло времени: {time.strftime('%H:%M:%S', time.gmtime(elapsed_time))}")
-        time.sleep(1)
 
 def remove_silence_using_metadata(input_path, output_path, TEMP_VIDEO_DIR):
     if os.path.exists(output_path):
@@ -429,18 +400,6 @@ def remove_silence_from_chunks(chunks):
             processed_chunks[idx] = future.result()
     return processed_chunks
 
-def transcribe_with_timer(chunk_path, message, model):
-    model = load_model()
-    try:
-        stop_event = threading.Event()
-        timer_thread = threading.Thread(target=start_timer, args=(stop_event, message))
-        timer_thread.start()
-        segments = model.transcribe(chunk_path, language="ru")
-    finally:
-        stop_event.set()
-        timer_thread.join()
-    return segments
-
 def transcribe_chunk(chunk_path, model):
     temp_srt_path = os.path.join(TEMP_VIDEO_DIR, f"{os.path.splitext(os.path.basename(chunk_path))[0]}_temp_srt.txt")
     if os.path.exists(temp_srt_path):
@@ -455,7 +414,7 @@ def transcribe_chunk(chunk_path, model):
     torch.cuda.empty_cache()
 
 def transcribe_all_chunks():
-    chunks = get_chunks()
+    chunks = get_silence_chunks()
     model = load_model()
     print('Поскольку whisper не отдает прогресса до момента полного выполнения, может казаться что ничего не происходит.')
     print('Прогресс бар может обновляться раз в несколько минут.')
@@ -474,7 +433,7 @@ def transcribe_all_chunks():
     print(f"\nОбщее время транскрибации: {time.strftime('%H:%M:%S', time.gmtime(total_time))}")
 
 def concatenate_srt_files():
-    video_chunks = get_chunks()
+    video_chunks = get_silence_chunks()
     try:
         with open(final_srt_path, 'w', encoding='utf-8') as final_srt:
             subtitle_counter = 1
@@ -505,38 +464,10 @@ def concatenate_srt_files():
         if os.path.exists(final_srt_path):
             os.remove(final_srt_path)
 
-
 def add_time_to_timestamp(timestamp, accumulated_time):
     h, m, s = map(float, timestamp.split(":"))
     total_seconds = h * 3600 + m * 60 + s + accumulated_time
     return time.strftime("%H:%M:%S", time.gmtime(total_seconds))
-
-def get_available_gpu_memory():
-    if torch.cuda.is_available():
-        torch.cuda.set_per_process_memory_fraction(0.9, 0)
-        reserved_memory_MB = torch.cuda.memory_reserved(0) / (1024 ** 2)
-        print(f"Зарезервированная память: {reserved_memory_MB:.2f} MB")
-        return reserved_memory_MB
-    else:
-        print("CUDA недоступна.")
-        return None
-
-def adaptive_worker_count():
-    reserved_memory_MB = get_available_gpu_memory()
-    if reserved_memory_MB is None:
-        return 1
-    if reserved_memory_MB > 10000:
-        return 12
-    elif reserved_memory_MB > 8000:
-        return 10
-    elif reserved_memory_MB > 6000:
-        return 8
-    elif reserved_memory_MB > 4000:
-        return 1
-    elif reserved_memory_MB > 2000:
-        return 3
-    else:
-        return 2
 
 def speed_up_video(input_path, output_path, speed_factor):
     if os.path.exists(output_path):
@@ -603,7 +534,6 @@ def main():
             analyze_audio(video_path)
             remove_silence_using_metadata(video_path, temp_no_silence_video, TEMP_VIDEO_DIR)
             if not os.path.exists(os.path.join(OUTPUT_DIR, final_srt_path)):
-                #transcribe_chunk(get_chunks()[0], load_model())
                 transcribe_all_chunks()
                 concatenate_srt_files()
         if speed_factor != 1:
