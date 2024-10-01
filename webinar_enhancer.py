@@ -158,18 +158,17 @@ def analyze_audio(TEMP_VIDEO_DIR, offset_dB, input_path, save_name=None, get_non
             save_name = os.path.splitext(os.path.basename(input_path))[0]
         interval_type = 'non_silence' if get_non_silence else 'silence'
         intervals_file_path = os.path.join(TEMP_VIDEO_DIR, f'{save_name}_{interval_type}_intervals.txt')
-
         if os.path.exists(intervals_file_path):
             onetime_print()
             with open(intervals_file_path, 'r') as f:
                 intervals = json.load(f)
             return intervals
-
         loudness = get_silence_threshold(TEMP_VIDEO_DIR, input_path)
         if loudness is None:
             raise RuntimeError("Не удалось определить порог тишины файла.")
-
         silence_threshold = loudness + offset_dB
+        print(f'Порог тишины: {round(silence_threshold, 2)} dB')
+
         command = [
             'ffmpeg', '-i', input_path,
             '-af', f'silencedetect=n={silence_threshold}dB:d={silence_gap}',
@@ -177,42 +176,30 @@ def analyze_audio(TEMP_VIDEO_DIR, offset_dB, input_path, save_name=None, get_non
             '-progress', 'pipe:1'
         ]
         process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, universal_newlines=True)
+        silence_log = []
+        threading.Thread(target=read_stderr, args=(process, silence_log)).start()
+        ffmpeg_progress(process, get_video_duration_in_seconds(input_path), "Поиск отрезков тишины")
 
+        silence_log_str = ''.join(silence_log)
         silence_intervals, non_silence_intervals = [], []
         start_time = 0.0
-
-        def process_log_line(line):
-            nonlocal start_time
+        for line in silence_log_str.split('\n'):
             start_match = re.search(r'silence_start:\s*([\d.]+)', line)
             if start_match:
                 end_time = float(start_match.group(1))
                 non_silence_intervals.append((start_time, end_time))
                 silence_intervals.append((end_time, None))
-
             end_match = re.search(r'silence_end:\s*([\d.]+)', line)
             if end_match:
                 start_time = float(end_match.group(1))
                 if silence_intervals and silence_intervals[-1][1] is None:
                     silence_intervals[-1] = (silence_intervals[-1][0], start_time)
-
-        # Чтение и обработка stderr по мере поступления данных
-        while True:
-            line = process.stderr.readline()
-            if not line:
-                break
-            process_log_line(line)
-
-        # Завершаем обработку последнего интервала
         if start_time is not None:
             non_silence_intervals.append((start_time, get_video_duration_in_seconds(input_path)))
-
         intervals = non_silence_intervals if get_non_silence else silence_intervals
-
         with open(intervals_file_path, 'w') as f:
             json.dump(intervals, f)
-
         return intervals
-
     except (KeyboardInterrupt, subprocess.CalledProcessError) as e:
         print(f"Ошибка при выполнении ffmpeg: {e.stderr}")
         if (process.returncode is not None and process.returncode != 0) or process.poll() is None:
@@ -220,8 +207,6 @@ def analyze_audio(TEMP_VIDEO_DIR, offset_dB, input_path, save_name=None, get_non
                 os.remove(intervals_file_path)
                 print(f"Файл {os.path.basename(intervals_file_path)} удален из-за ошибки.")
         raise
-
-
 def calculate_remaining_duration(non_silence_intervals):
     remaining_duration = 0
     for start, end in non_silence_intervals:
