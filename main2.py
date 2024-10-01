@@ -118,7 +118,7 @@ def read_stderr(process, log_container):
             log_container.append(output)
 
 def get_silence_threshold(input_path):
-    threshold_file_path = os.path.join(TEMP_VIDEO_DIR, f"{os.path.basename(input_path).split('.')[0]}_threshold.txt")
+    threshold_file_path = os.path.join(TEMP_VIDEO_DIR, f"{os.path.splitext(os.path.basename(input_path))[0]}_threshold.txt")
     if os.path.exists(threshold_file_path):
         with open(threshold_file_path, 'r') as f:
             try:
@@ -295,7 +295,7 @@ def split_video_by_points(input_path, split_points):
     points = [0] + split_points
     for i, start in enumerate(points, 1):
         end = split_points[i - 1] if i <= len(split_points) else None
-        output_chunk = os.path.join(TEMP_VIDEO_DIR, f"{video_file_name.split('.')[0]}_chunk_{i}.mp4")
+        output_chunk = os.path.join(TEMP_VIDEO_DIR, f"{os.path.splitext(video_file_name)[0]}_chunk_{i}.mp4")
         if os.path.exists(output_chunk):
             temp_files.append(output_chunk)
             continue
@@ -315,15 +315,15 @@ def get_chunks_non_silence_intervals(video_chunks):
     return chunk_non_silence_intervals
 
 def concatenate_chunks():
-    output_file = os.path.join(TEMP_VIDEO_DIR, f"{video_file_name.split('.')[0]}_final_no_silence.mp4")
+    output_file = os.path.join(TEMP_VIDEO_DIR, f"{os.path.splitext(video_file_name)[0]}_final_no_silence.mp4")
     if os.path.exists(output_file):
         return output_file
     video_chunks = get_chunks()
     if not video_chunks:
         raise FileNotFoundError(
-            f"Видео файлы по шаблону {video_file_name.split('.')[0]}_chunk_*_no_silence.mp4 не найдены в {TEMP_VIDEO_DIR}.")
+            f"Видео файлы по шаблону {os.path.splitext(video_file_name)[0]}_chunk_*_no_silence.mp4 не найдены в {TEMP_VIDEO_DIR}.")
 
-    concat_file_path = os.path.join(TEMP_VIDEO_DIR, f'{video_file_name.split('.')[0]}_concat_list.txt')
+    concat_file_path = os.path.join(TEMP_VIDEO_DIR, f'{os.path.splitext(video_file_name)[0]}_concat_list.txt')
     if not os.path.exists(concat_file_path):
         with open(concat_file_path, 'w') as concat_file:
             for chunk in video_chunks:
@@ -352,7 +352,7 @@ def concatenate_chunks():
 
 def get_chunks():
     if get_video_duration_in_seconds(video_path) > 20*60:
-        chunk_pattern = re.compile(rf"{re.escape(video_file_name.split('.')[0])}_chunk_(\d+)_no_silence\.mp4")
+        chunk_pattern = re.compile(rf"{re.escape(os.path.splitext(video_file_name)[0])}_chunk_(\d+)_no_silence\.mp4")
         video_chunks = sorted([
             os.path.join(TEMP_VIDEO_DIR, f) for f in os.listdir(TEMP_VIDEO_DIR)
             if chunk_pattern.match(f)
@@ -370,7 +370,7 @@ def timer_thread(start_time, stop_event, progress_bar):
 def remove_silence_using_metadata(input_path, output_path, TEMP_VIDEO_DIR):
     if os.path.exists(output_path):
         return
-    intervals_file_path = os.path.join(TEMP_VIDEO_DIR, f'{os.path.basename(input_path).split('.')[0]}_non_silence_intervals.txt')
+    intervals_file_path = os.path.join(TEMP_VIDEO_DIR, f'{os.path.splitext(os.path.basename(input_path))[0]}_non_silence_intervals.txt')
     if os.path.exists(intervals_file_path):
         with open(intervals_file_path, 'r') as f:
             non_silence_intervals = json.load(f)
@@ -389,7 +389,7 @@ def remove_silence_using_metadata(input_path, output_path, TEMP_VIDEO_DIR):
         raise ValueError("Фильтр для удаления тишины пустой.")
     concat_inputs = ''.join([f"[v{idx}][a{idx}]" for idx in range(len(non_silence_intervals))])
     filter_complex += f"{concat_inputs}concat=n={len(non_silence_intervals)}:v=1:a=1[v][a]"
-    filter_file_path = os.path.join(TEMP_VIDEO_DIR, f'{os.path.basename(input_path).split('.')[0]}_silence_filter.txt')
+    filter_file_path = os.path.join(TEMP_VIDEO_DIR, f'{os.path.splitext(os.path.basename(input_path))[0]}_silence_filter.txt')
     if not os.path.exists(filter_file_path):
         with open(filter_file_path, 'w') as f:
             f.write(filter_complex)
@@ -421,7 +421,7 @@ def remove_silence_from_chunks(chunks):
                 remove_silence_using_metadata,
                 chunk,
                 os.path.join(TEMP_VIDEO_DIR,
-                             f"{os.path.basename(chunk).split('.')[0]}_no_silence.mp4"), TEMP_VIDEO_DIR
+                             f"{os.path.splitext(os.path.basename(chunk))[0]}_no_silence.mp4"), TEMP_VIDEO_DIR
             ): i for i, chunk in enumerate(chunks)
         }
         for future in as_completed(futures):
@@ -442,7 +442,7 @@ def transcribe_with_timer(chunk_path, message, model):
     return segments
 
 def transcribe_chunk(chunk_path, model):
-    temp_srt_path = os.path.join(TEMP_VIDEO_DIR, f"{os.path.basename(chunk_path).split('.')[0]}_temp_srt.txt")
+    temp_srt_path = os.path.join(TEMP_VIDEO_DIR, f"{os.path.splitext(os.path.basename(chunk_path))[0]}_temp_srt.txt")
     if os.path.exists(temp_srt_path):
         return
     segments = model.transcribe(chunk_path, language="ru")
@@ -480,7 +480,7 @@ def concatenate_srt_files():
             subtitle_counter = 1
             accumulated_time = 0.0
             for chunk in video_chunks:
-                temp_srt_path = os.path.join(TEMP_VIDEO_DIR, f"{os.path.basename(chunk).split('.')[0]}_temp_srt.txt")
+                temp_srt_path = os.path.join(TEMP_VIDEO_DIR, f"{os.path.splitext(os.path.basename(chunk))[0]}_temp_srt.txt")
                 chunk_duration = get_video_duration_in_seconds(chunk) / speed_factor
                 if os.path.exists(temp_srt_path):
                     with open(temp_srt_path, 'r', encoding='utf-8', errors='replace') as temp_srt:
@@ -575,8 +575,8 @@ def main():
     try:
         video_file_name = input("Введите название видеофайла (с расширением): ")
         start_time = time.time()
-        final_video_path = os.path.join(OUTPUT_DIR, video_file_name.split('.')[0] + "_output.mp4")
-        final_srt_path = os.path.join(OUTPUT_DIR, video_file_name.split('.')[0] + "_output.srt")
+        final_video_path = os.path.join(OUTPUT_DIR, os.path.splitext(video_file_name)[0] + "_output.mp4")
+        final_srt_path = os.path.join(OUTPUT_DIR, os.path.splitext(video_file_name)[0] + "_output.srt")
         if os.path.exists(final_video_path) and os.path.exists(final_srt_path):
             print(f"Финальный файл {os.path.basename(final_video_path)} уже существует.")
             return
@@ -585,7 +585,7 @@ def main():
         os.makedirs(TEMP_VIDEO_DIR, exist_ok=True)
         video_path = os.path.join(SOURCE_DIR, video_file_name)
 
-        temp_no_silence_video = os.path.join(TEMP_VIDEO_DIR, f'{video_file_name.split('.')[0]}_final_no_silence.mp4')
+        temp_no_silence_video = os.path.join(TEMP_VIDEO_DIR, f'{os.path.splitext(video_file_name)[0]}_final_no_silence.mp4')
         if not os.path.exists(video_path):
             raise FileNotFoundError("Файл не найден. Проверьте путь и имя файла в папке .source.")
         print('Длительность видео', datetime.timedelta(seconds=int(get_video_duration_in_seconds(video_path))))
