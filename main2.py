@@ -105,6 +105,12 @@ def read_stderr(process, log_container):
         if output:
             log_container.append(output)
 
+def timer_thread(start_time, stop_event, progress_bar):
+    while not stop_event.is_set():
+        elapsed_time = time.time() - start_time
+        progress_bar.set_postfix_str(f"Прошло времени: {time.strftime('%H:%M:%S', time.gmtime(elapsed_time))}")
+        time.sleep(1)
+
 def adjust_subtitles(segments, speed_factor):
     adjusted_segments = []
     for segment in segments:
@@ -270,18 +276,22 @@ def split_video_on_silence(input_path, silence_intervals, chunk_duration=15 * 60
 def split_video_by_points(input_path, split_points):
     temp_files = []
     points = [0] + split_points
-    for i, start in enumerate(points, 1):
-        end = split_points[i - 1] if i <= len(split_points) else None
-        output_chunk = os.path.join(TEMP_VIDEO_DIR, f"{os.path.splitext(video_file_name)[0]}_chunk_{i}.mp4")
-        if os.path.exists(output_chunk):
+    total_chunks = len(points)
+    with tqdm(total=total_chunks, desc="Splitting video", unit="chunks") as pbar:
+        for i, start in enumerate(points, 1):
+            end = split_points[i - 1] if i <= len(split_points) else None
+            output_chunk = os.path.join(TEMP_VIDEO_DIR, f"{os.path.splitext(video_file_name)[0]}_chunk_{i}.mp4")
+            if os.path.exists(output_chunk):
+                temp_files.append(output_chunk)
+                pbar.update(1)
+                continue
+            command = [
+                          'ffmpeg', '-loglevel', 'quiet', '-i', input_path,
+                          '-ss', str(start)
+                      ] + (['-to', str(end)] if end else []) + ['-c', 'copy', '-b:v', '2000k', output_chunk]
+            subprocess.run(command, check=True)
             temp_files.append(output_chunk)
-            continue
-        command = [
-            'ffmpeg', '-loglevel', 'quiet', '-i', input_path,
-            '-ss', str(start)
-        ] + (['-to', str(end)] if end else []) + ['-c', 'copy', '-b:v', '2000k', output_chunk]
-        subprocess.run(command, check=True)
-        temp_files.append(output_chunk)
+            pbar.update(1)
     return temp_files
 
 def get_chunks_non_silence_intervals(video_chunks):
