@@ -178,7 +178,7 @@ def ffmpeg_progress(process, duration, message):
 
 def analyze_audio(TEMP_VIDEO_DIR, offset_dB, input_path, save_name=None, get_non_silence=True):
     if save_name is None:
-        save_name = os.path.basename(input_path).split(".")[0]
+        save_name = os.path.splitext(os.path.basename(input_path))[0]
     interval_type = 'non_silence' if get_non_silence else 'silence'
 
     # Формируем путь для сохранения файла с интервалами
