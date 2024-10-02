@@ -12,7 +12,8 @@ import datetime
 import shutil
 from concurrent.futures import ProcessPoolExecutor, as_completed
 import traceback
-from multiprocessing import Pool
+import tempfile
+
 
 model_name = None
 speed_factor = None
@@ -151,35 +152,80 @@ def get_silence_threshold(TEMP_VIDEO_DIR, input_path):
     except (KeyboardInterrupt, subprocess.CalledProcessError, Exception):
         raise
 
+
+import os
+import json
+import subprocess
+import re
+import tempfile
+import threading
+
+
+def ffmpeg_progress(process, duration, message):
+    """Функция для отображения прогресса."""
+    while process.poll() is None:
+        line = process.stdout.readline().strip()
+        if "out_time=" in line:
+            time_match = re.search(r"out_time=([\d:.]+)", line)
+            if time_match:
+                time_str = time_match.group(1)
+                time_parts = list(map(float, time_str.split(":")))
+                elapsed = time_parts[0] * 3600 + time_parts[1] * 60 + time_parts[2]
+                progress = min(elapsed / duration, 1.0) * 100
+                print(f"{message}: {progress:.2f}%")
+    print(f"{message}: Завершено")
+
+
 def analyze_audio(TEMP_VIDEO_DIR, offset_dB, input_path, save_name=None, get_non_silence=True):
     if save_name is None:
         save_name = os.path.basename(input_path).split(".")[0]
     interval_type = 'non_silence' if get_non_silence else 'silence'
+
+    # Формируем путь для сохранения файла с интервалами
     intervals_file_path = os.path.join(TEMP_VIDEO_DIR, f'{save_name}_{interval_type}_intervals.txt')
+
+    # Если файл уже существует, возвращаем результат
     if os.path.exists(intervals_file_path):
-        onetime_print()
         with open(intervals_file_path, 'r') as f:
             intervals = json.load(f)
         return intervals
 
+    # Порог тишины
     loudness = get_silence_threshold(TEMP_VIDEO_DIR, input_path)
     if loudness is None:
         raise RuntimeError("Не удалось определить порог тишины файла.")
     silence_threshold = loudness + offset_dB
-    print(f'Порог тишины: {round(silence_threshold, 2)} dB')
 
+    # Создаем временный файл для логов
+    with tempfile.NamedTemporaryFile(delete=False, suffix='.log', dir=TEMP_VIDEO_DIR) as temp_file:
+        log_file_path = temp_file.name
+
+    # Команда для ffmpeg, записывающая stderr в лог
     command = [
         'ffmpeg', '-i', input_path,
-        '-af', f'silencedetect=n={silence_threshold}dB:d={silence_gap}',
+        '-af', f'silencedetect=n={silence_threshold}dB:d=0.5',
         '-f', 'null', '-',
         '-progress', 'pipe:1'
     ]
-    process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, universal_newlines=True)
-    silence_log = []
-    threading.Thread(target=read_stderr, args=(process, silence_log)).start()
-    ffmpeg_progress(process, get_video_duration_in_seconds(input_path), "Поиск отрезков тишины")
 
-    silence_log_str = ''.join(silence_log)
+    process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, universal_newlines=True)
+    threading.Thread(target=ffmpeg_progress, args=(process, get_video_duration_in_seconds(input_path), f"Поиск отрезков тишины {save_name}")).start()
+
+    # Читаем stderr
+    with open(log_file_path, 'w') as log_file:
+        while True:
+            line = process.stderr.readline()
+            if not line:
+                break
+            log_file.write(line)
+
+    process.wait()
+
+    # Читаем содержимое лог-файла
+    with open(log_file_path, 'r') as log_file:
+        silence_log_str = log_file.read()
+
+    # Парсинг логов для интервалов
     silence_intervals, non_silence_intervals = [], []
     start_time = 0.0
 
@@ -196,12 +242,23 @@ def analyze_audio(TEMP_VIDEO_DIR, offset_dB, input_path, save_name=None, get_non
             if silence_intervals and silence_intervals[-1][1] is None:
                 silence_intervals[-1] = (silence_intervals[-1][0], start_time)
 
+    # Добавляем последний интервал
     if start_time is not None:
         non_silence_intervals.append((start_time, get_video_duration_in_seconds(input_path)))
+
+    # Выбираем интервалы тишины или не-тишины
     intervals = non_silence_intervals if get_non_silence else silence_intervals
+
+    # Сохраняем интервалы в файл
     with open(intervals_file_path, 'w') as f:
         json.dump(intervals, f)
+
+    # Удаляем временный лог-файл
+    os.remove(log_file_path)
+
     return intervals
+
+
 def calculate_remaining_duration(non_silence_intervals):
     remaining_duration = 0
     for start, end in non_silence_intervals:
@@ -307,7 +364,7 @@ def get_chunks_non_silence_intervals():
     intervals = get_temp_txts(pattern)
     if len(chunks) != len(intervals):
         intervals = [None] * len(chunks)
-        with ProcessPoolExecutor(max_workers=1) as executor:
+        with ProcessPoolExecutor() as executor:
             futures = {
                 executor.submit(
                     analyze_audio,
