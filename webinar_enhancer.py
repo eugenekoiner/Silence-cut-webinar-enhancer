@@ -152,17 +152,7 @@ def get_silence_threshold(TEMP_VIDEO_DIR, input_path):
     except (KeyboardInterrupt, subprocess.CalledProcessError, Exception):
         raise
 
-
-import os
-import json
-import subprocess
-import re
-import tempfile
-import threading
-
-
 def ffmpeg_progress(process, duration, message):
-    """Функция для отображения прогресса."""
     while process.poll() is None:
         line = process.stdout.readline().strip()
         if "out_time=" in line:
