@@ -284,7 +284,7 @@ def get_video_duration_in_seconds(input_path):
 def split_video_on_silence(input_path, silence_intervals, chunk_duration=15 * 60, search_window=5 * 60):
 
     split_points = []
-    split_points_file_path = os.path.join(TEMP_VIDEO_DIR, f'{os.path.basename(input_path).split(".")[0]}_split_points.txt')
+    split_points_file_path = os.path.join(TEMP_VIDEO_DIR, f'{os.path.splitext(os.path.basename(input_path))[0]}_split_points.txt')
     if os.path.exists(split_points_file_path):
         with open(split_points_file_path, 'r') as f:
             split_points = json.load(f)
@@ -615,7 +615,7 @@ def main():
         if os.path.exists(final_video_path) and os.path.exists(final_srt_path):
             print(f"Финальный файл {os.path.basename(final_video_path)} уже существует.")
             return
-        TEMP_VIDEO_DIR = os.path.join(TEMP_DIR, video_file_name.split(".")[0])
+        TEMP_VIDEO_DIR = os.path.join(TEMP_DIR, os.path.splitext(video_file_name)[0])
         clear_cache()
         os.makedirs(TEMP_VIDEO_DIR, exist_ok=True)
         video_path = os.path.join(SOURCE_DIR, video_file_name)
