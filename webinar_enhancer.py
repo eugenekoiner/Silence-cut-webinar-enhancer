@@ -247,7 +247,7 @@ def get_video_duration_in_seconds(input_path):
     result = float(subprocess.run(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, universal_newlines=True).stdout.strip())  # в секундах
     return result
 
-def split_video_on_silence(input_path, silence_intervals, chunk_duration=15 * 60, search_window=5 * 60):
+def split_video_on_silence(input_path, silence_intervals, chunk_duration=10 * 60, search_window=5 * 60):
     split_points = []
     split_points_file_path = os.path.join(TEMP_VIDEO_DIR, f'{os.path.splitext(os.path.basename(input_path))[0]}_split_points.txt')
     if os.path.exists(split_points_file_path):
