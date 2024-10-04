@@ -274,7 +274,7 @@ def split_video_on_silence(input_path, silence_intervals, chunk_duration=15 * 60
         else:
             split_points.append(target_time)
             current_position = target_time
-    if video_duration - current_position < 5000:
+    if video_duration - current_position < 5*60:
         split_points.remove(current_position)
     with open(split_points_file_path, 'w', encoding='utf-8') as f:
         json.dump(split_points, f)
