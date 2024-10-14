@@ -72,7 +72,7 @@ def initialize_params():
         silence_gap = input(f"Настройки ожидания тишины ({DEFAULT_SILENCE_GAP} по умолчанию): ")
         silence_gap = float(silence_gap) if silence_gap else DEFAULT_SILENCE_GAP
         result_bitrate = input(
-            f"Введите значние битрейта для финального видео (по умолчанию {DEFAULT_RESULT_BITRATE}): ")
+            f"Введите значние битрейта для финального видео (по умолчанию {DEFAULT_RESULT_BITRATE}): ") if result_bitrate else DEFAULT_RESULT_BITRATE
         need_transcription = input(
             f"Нужны ли субтитры ({DEFAULT_NEED_TRANSCRIPTION} по умолчанию): " or DEFAULT_NEED_TRANSCRIPTION)
         model_name = input(
