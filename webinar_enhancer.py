@@ -57,7 +57,7 @@ def initialize_params():
         speed_factor = config.get('speed_factor', DEFAULT_SPEED_FACTOR)
         offset_dB = config.get('offset_dB', DEFAULT_OFFSET_DB)
         silence_gap = config.get('silence_gap', DEFAULT_SILENCE_GAP)
-        need_transcription = config.get('transcription', DEFAULT_NEED_TRANSCRIPTION)
+        need_transcription = config.get('need_transcription', DEFAULT_NEED_TRANSCRIPTION)
     else:
         print("Конфигурационный файл не найден. Введите параметры вручную.")
         model_name = input(f"Введите название модели (по умолчанию '{DEFAULT_MODEL_NAME}'): ") or DEFAULT_MODEL_NAME
