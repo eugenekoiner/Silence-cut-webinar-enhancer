@@ -64,7 +64,6 @@ def initialize_params():
         result_bitrate = config.get('result_bitrate', DEFAULT_RESULT_BITRATE)
     else:
         print("Конфигурационный файл не найден. Введите параметры вручную.")
-        model_name = input(f"Введите название модели (по умолчанию '{DEFAULT_MODEL_NAME}'): ") or DEFAULT_MODEL_NAME
         speed_factor = input(
             f"Во сколько вы хотите ускорить видео (1 если ускорение не нужно, по умолчанию {DEFAULT_SPEED_FACTOR}): ")
         speed_factor = float(speed_factor) if speed_factor else DEFAULT_SPEED_FACTOR
@@ -76,6 +75,8 @@ def initialize_params():
             f"Введите значние битрейта для финального видео (по умолчанию {DEFAULT_RESULT_BITRATE}): ")
         need_transcription = input(
             f"Нужны ли субтитры ({DEFAULT_NEED_TRANSCRIPTION} по умолчанию): " or DEFAULT_NEED_TRANSCRIPTION)
+        model_name = input(
+            f"Введите название модели (по умолчанию '{DEFAULT_MODEL_NAME}'): ") if need_transcription == 'yes' else DEFAULT_MODEL_NAME
         config = {
             'model_name': model_name,
             'speed_factor': speed_factor,
