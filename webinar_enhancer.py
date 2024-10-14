@@ -549,7 +549,7 @@ def speed_up_video(input_path, output_path, speed_factor):
         '-filter:v', f'setpts={1 / speed_factor}*PTS',
         '-filter:a', f'atempo={speed_factor}',
         '-c:v', 'h264_nvenc',
-        '-b:v', '300k',
+        '-b:v', '500k',
         '-progress', 'pipe:1',
         output_path
     ]
