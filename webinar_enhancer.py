@@ -84,7 +84,7 @@ def initialize_params():
         silence_gap = float(silence_gap) if silence_gap else DEFAULT_SILENCE_GAP
         result_bitrate = input(f"Введите значение битрейта для финального видео (по умолчанию {DEFAULT_RESULT_BITRATE}): ") if result_bitrate else DEFAULT_RESULT_BITRATE
         need_transcription = input(f"Нужны ли субтитры ({DEFAULT_NEED_TRANSCRIPTION} по умолчанию): " or DEFAULT_NEED_TRANSCRIPTION)
-        source_language = input(f"Введите язык (по умолчанию '{DEFAULT_SOURCE_LANGUAGE}'): )") if need_transcription == 'yes' else DEFAULT_SOURCE_LANGUAGE
+        source_language = input(f"Введите язык исходника (по умолчанию '{DEFAULT_SOURCE_LANGUAGE}'): ") if need_transcription == 'yes' else DEFAULT_SOURCE_LANGUAGE
         model_name = input(f"Введите название модели (по умолчанию '{DEFAULT_MODEL_NAME}'): ") if need_transcription == 'yes' else DEFAULT_MODEL_NAME
         need_translation = input(f"Нужен ли перевод ({DEFAULT_NEED_TRANSLATION} по умолчанию): ") if need_transcription == 'yes' else DEFAULT_NEED_TRANSLATION
         translation_language = input(f"На какой язык переводить ({DEFAULT_TRANSLATION_LANGUAGE} по умолчанию): ") if need_translation == 'yes' else DEFAULT_TRANSLATION_LANGUAGE
