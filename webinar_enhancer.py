@@ -13,7 +13,7 @@ import shutil
 from concurrent.futures import ProcessPoolExecutor, as_completed
 import traceback
 import tempfile
-import langcodes
+import pycountry
 from translate import Translator
 import srt
 
@@ -42,6 +42,7 @@ os.makedirs(OUTPUT_DIR, exist_ok=True)
 os.makedirs(OUTPUT_DIR, exist_ok=True)
 os.makedirs(CONFIG_DIR, exist_ok=True)
 warnings.filterwarnings("ignore", category=FutureWarning)
+warnings.filterwarnings("ignore", message=".*Torch was not compiled with flash attention.*")
 temp_no_silence_video = None
 final_video_path = None
 final_srt_path = None
@@ -70,7 +71,7 @@ def initialize_params():
         silence_gap = config.get('silence_gap', DEFAULT_SILENCE_GAP)
         result_bitrate = config.get('result_bitrate', DEFAULT_RESULT_BITRATE)
         need_transcription = config.get('need_transcription', DEFAULT_NEED_TRANSCRIPTION)
-        source_language = config.get('language', DEFAULT_SOURCE_LANGUAGE)
+        source_language = config.get('source_language', DEFAULT_SOURCE_LANGUAGE)
         model_name = config.get('model_name', DEFAULT_MODEL_NAME)
         need_translation = config.get('need_translation', DEFAULT_NEED_TRANSLATION)
         translation_language = config.get('translation_language', DEFAULT_TRANSLATION_LANGUAGE)
@@ -526,7 +527,7 @@ def transcribe_chunk(chunk_path, model):
     temp_srt_path = os.path.join(TEMP_VIDEO_DIR, f"{os.path.splitext(os.path.basename(chunk_path))[0]}_temp_srt.txt")
     if os.path.exists(temp_srt_path):
         return
-    segments = model.transcribe(chunk_path, language=langcodes.standardize_tag(source_language))
+    segments = model.transcribe(chunk_path, language=pycountry.languages.get(name=source_language.strip().capitalize()).alpha_2)
     adjusted_segments = adjust_subtitles(segments['segments'], speed_factor)
     with open(temp_srt_path, 'w', encoding='utf-8') as srt_file:
         for i, (start, end, text) in enumerate(adjusted_segments, start=1):
@@ -537,7 +538,7 @@ def transcribe_chunk(chunk_path, model):
 
 
 def translate_srt(srt_path, target_lang):
-    translator = Translator(to_lang=langcodes.standardize_tag(target_lang))
+    translator = Translator(to_lang=pycountry.languages.get(name=target_lang.strip().capitalize()).alpha_2)
     with open(srt_path, 'r', encoding='utf-8') as f:
         srt_content = f.read()
     subtitles = list(srt.parse(srt_content))
@@ -574,32 +575,34 @@ def concatenate_srt_files():
     video_chunks = get_chunks()
     try:
         with open(final_srt_path, 'w', encoding='utf-8') as final_srt:
-            subtitle_counter = 1
+            subtitle_counter = 1  # Начинаем с 1 для каждого финального файла
             accumulated_time = 0.0
             for chunk in video_chunks:
                 temp_srt_path = os.path.join(TEMP_VIDEO_DIR, f"{os.path.splitext(os.path.basename(chunk))[0]}_temp_srt.txt")
                 chunk_duration = get_video_duration_in_seconds(chunk) / speed_factor
                 if os.path.exists(temp_srt_path):
                     with open(temp_srt_path, 'r', encoding='utf-8', errors='replace') as temp_srt:
-                        for line in temp_srt:
+                        lines = temp_srt.readlines()
+                        for line in lines:
                             if '-->' in line:
                                 times = line.strip().split(' --> ')
                                 start_time = add_time_to_timestamp(times[0], accumulated_time)
                                 end_time = add_time_to_timestamp(times[1], accumulated_time)
                                 final_srt.write(f"{subtitle_counter}\n{start_time} --> {end_time}\n")
                                 subtitle_counter += 1
-                            else:
+                            elif not line.strip().isdigit():  # Пропускаем номера
                                 final_srt.write(line)
                 else:
                     print(f"SRT файл для {os.path.basename(chunk)} не найден.")
                 accumulated_time += chunk_duration
-            if need_translation:
-                translate_srt(final_srt_path, translation_language)
+            # if need_translation:
+            #     translate_srt(final_srt_path, translation_language)
             print(f"Финальный файл субтитров сохранен как {os.path.basename(final_srt_path)}.")
     except (KeyboardInterrupt, subprocess.CalledProcessError):
         traceback.print_exc()
         if os.path.exists(final_srt_path):
             os.remove(final_srt_path)
+
 
 
 def add_time_to_timestamp(timestamp, accumulated_time):
