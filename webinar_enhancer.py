@@ -76,9 +76,12 @@ def initialize_params():
         translation_language = config.get('translation_language', DEFAULT_TRANSLATION_LANGUAGE)
     else:
         print("Конфигурационный файл не найден. Введите параметры вручную.")
-        speed_factor = float(input(f"Во сколько вы хотите ускорить видео (1 если ускорение не нужно, по умолчанию {DEFAULT_SPEED_FACTOR}): ")) if speed_factor else DEFAULT_SPEED_FACTOR
-        offset_dB = float(input(f"Настройки чувствительности тишины ({DEFAULT_OFFSET_DB} по умолчанию): ")) if offset_dB else DEFAULT_OFFSET_DB
-        silence_gap = float(input(f"Настройки ожидания тишины ({DEFAULT_SILENCE_GAP} по умолчанию): ")) if silence_gap else DEFAULT_SILENCE_GAP
+        speed_factor = input(f"Во сколько вы хотите ускорить видео (1 если ускорение не нужно, по умолчанию {DEFAULT_SPEED_FACTOR}): ")
+        speed_factor = float(speed_factor) if speed_factor else DEFAULT_SPEED_FACTOR
+        offset_dB = input(f"Настройки чувствительности тишины ({DEFAULT_OFFSET_DB} по умолчанию): ")
+        offset_dB = float(offset_dB) if offset_dB else DEFAULT_OFFSET_DB
+        silence_gap = input(f"Настройки ожидания тишины ({DEFAULT_SILENCE_GAP} по умолчанию): ")
+        silence_gap = float(silence_gap) if silence_gap else DEFAULT_SILENCE_GAP
         result_bitrate = input(f"Введите значение битрейта для финального видео (по умолчанию {DEFAULT_RESULT_BITRATE}): ") if result_bitrate else DEFAULT_RESULT_BITRATE
         need_transcription = input(f"Нужны ли субтитры ({DEFAULT_NEED_TRANSCRIPTION} по умолчанию): " or DEFAULT_NEED_TRANSCRIPTION)
         source_language = input(f"Введите язык (по умолчанию '{DEFAULT_SOURCE_LANGUAGE}'): )") if need_transcription == 'yes' else DEFAULT_SOURCE_LANGUAGE
