@@ -13,14 +13,20 @@ import shutil
 from concurrent.futures import ProcessPoolExecutor, as_completed
 import traceback
 import tempfile
+import langcodes
+from translate import Translator
+import srt
 
-model_name = None
+video_path = None
 speed_factor = None
 offset_dB = None
 silence_gap = None
-video_path = None
-need_transcription = None
 result_bitrate = None
+need_transcription = None
+source_language = None
+model_name = None
+need_translation = None
+translation_language = None
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 MODEL_DIR = os.path.join(SCRIPT_DIR, '.models')
 SOURCE_DIR = os.path.join(SCRIPT_DIR, '.source')
@@ -44,51 +50,57 @@ continue_counter = 0
 
 
 def initialize_params():
-    global model_name, speed_factor, offset_dB, silence_gap, result_bitrate, need_transcription
-    DEFAULT_MODEL_NAME = "base"
+    global speed_factor, offset_dB, silence_gap, result_bitrate, need_transcription, source_language, model_name, need_translation, translation_language
     DEFAULT_SPEED_FACTOR = 1.25
     DEFAULT_OFFSET_DB = 1
     DEFAULT_SILENCE_GAP = 0.5
-    DEFAULT_NEED_TRANSCRIPTION = 'no'
     DEFAULT_RESULT_BITRATE = 300
+    DEFAULT_NEED_TRANSCRIPTION = 'no'
+    DEFAULT_SOURCE_LANGUAGE = "english"
+    DEFAULT_MODEL_NAME = "base"
+    DEFAULT_NEED_TRANSLATION = 'no'
+    DEFAULT_TRANSLATION_LANGUAGE = "russian"
 
     if os.path.exists(CONFIG_FILE):
         print(f"Загрузка конфигурации из файла {os.path.basename(CONFIG_FILE)}...")
         with open(CONFIG_FILE, 'r', encoding='utf-8') as f:
             config = json.load(f)
-        model_name = config.get('model_name', DEFAULT_MODEL_NAME)
         speed_factor = config.get('speed_factor', DEFAULT_SPEED_FACTOR)
         offset_dB = config.get('offset_dB', DEFAULT_OFFSET_DB)
         silence_gap = config.get('silence_gap', DEFAULT_SILENCE_GAP)
-        need_transcription = config.get('need_transcription', DEFAULT_NEED_TRANSCRIPTION)
         result_bitrate = config.get('result_bitrate', DEFAULT_RESULT_BITRATE)
+        need_transcription = config.get('need_transcription', DEFAULT_NEED_TRANSCRIPTION)
+        source_language = config.get('language', DEFAULT_SOURCE_LANGUAGE)
+        model_name = config.get('model_name', DEFAULT_MODEL_NAME)
+        need_translation = config.get('need_translation', DEFAULT_NEED_TRANSLATION)
+        translation_language = config.get('translation_language', DEFAULT_TRANSLATION_LANGUAGE)
     else:
         print("Конфигурационный файл не найден. Введите параметры вручную.")
-        speed_factor = input(
-            f"Во сколько вы хотите ускорить видео (1 если ускорение не нужно, по умолчанию {DEFAULT_SPEED_FACTOR}): ")
-        speed_factor = float(speed_factor) if speed_factor else DEFAULT_SPEED_FACTOR
-        offset_dB = input(f"Настройки чувствительности тишины ({DEFAULT_OFFSET_DB} по умолчанию): ")
-        offset_dB = float(offset_dB) if offset_dB else DEFAULT_OFFSET_DB
-        silence_gap = input(f"Настройки ожидания тишины ({DEFAULT_SILENCE_GAP} по умолчанию): ")
-        silence_gap = float(silence_gap) if silence_gap else DEFAULT_SILENCE_GAP
-        result_bitrate = input(
-            f"Введите значние битрейта для финального видео (по умолчанию {DEFAULT_RESULT_BITRATE}): ") if result_bitrate else DEFAULT_RESULT_BITRATE
-        need_transcription = input(
-            f"Нужны ли субтитры ({DEFAULT_NEED_TRANSCRIPTION} по умолчанию): " or DEFAULT_NEED_TRANSCRIPTION)
-        model_name = input(
-            f"Введите название модели (по умолчанию '{DEFAULT_MODEL_NAME}'): ") if need_transcription == 'yes' else DEFAULT_MODEL_NAME
+        speed_factor = float(input(f"Во сколько вы хотите ускорить видео (1 если ускорение не нужно, по умолчанию {DEFAULT_SPEED_FACTOR}): ")) if speed_factor else DEFAULT_SPEED_FACTOR
+        offset_dB = float(input(f"Настройки чувствительности тишины ({DEFAULT_OFFSET_DB} по умолчанию): ")) if offset_dB else DEFAULT_OFFSET_DB
+        silence_gap = float(input(f"Настройки ожидания тишины ({DEFAULT_SILENCE_GAP} по умолчанию): ")) if silence_gap else DEFAULT_SILENCE_GAP
+        result_bitrate = input(f"Введите значение битрейта для финального видео (по умолчанию {DEFAULT_RESULT_BITRATE}): ") if result_bitrate else DEFAULT_RESULT_BITRATE
+        need_transcription = input(f"Нужны ли субтитры ({DEFAULT_NEED_TRANSCRIPTION} по умолчанию): " or DEFAULT_NEED_TRANSCRIPTION)
+        source_language = input(f"Введите язык (по умолчанию '{DEFAULT_SOURCE_LANGUAGE}'): )") if need_transcription == 'yes' else DEFAULT_SOURCE_LANGUAGE
+        model_name = input(f"Введите название модели (по умолчанию '{DEFAULT_MODEL_NAME}'): ") if need_transcription == 'yes' else DEFAULT_MODEL_NAME
+        need_translation = input(f"Нужен ли перевод ({DEFAULT_NEED_TRANSLATION} по умолчанию): ") if need_transcription == 'yes' else DEFAULT_NEED_TRANSLATION
+        translation_language = input(f"На какой язык переводить ({DEFAULT_TRANSLATION_LANGUAGE} по умолчанию): ") if need_translation == 'yes' else DEFAULT_TRANSLATION_LANGUAGE
+
         config = {
-            'model_name': model_name,
             'speed_factor': speed_factor,
             'offset_dB': offset_dB,
             'silence_gap': silence_gap,
+            "result_bitrate": result_bitrate,
             'need_transcription': need_transcription,
-            "result_bitrate": result_bitrate
+            'source_language': source_language,
+            'model_name': model_name,
+            'need_translation': need_translation,
+            'translation_language': translation_language
         }
         os.makedirs(os.path.dirname(CONFIG_FILE), exist_ok=True)
         with open(CONFIG_FILE, 'w', encoding='utf-8') as f:
             json.dump(config, f, indent=4)
-    return model_name, speed_factor, offset_dB, silence_gap, result_bitrate, need_transcription
+    return speed_factor, offset_dB, silence_gap, result_bitrate, need_transcription, source_language, model_name, need_translation, translation_language
 
 
 def clear_cache():
@@ -511,7 +523,7 @@ def transcribe_chunk(chunk_path, model):
     temp_srt_path = os.path.join(TEMP_VIDEO_DIR, f"{os.path.splitext(os.path.basename(chunk_path))[0]}_temp_srt.txt")
     if os.path.exists(temp_srt_path):
         return
-    segments = model.transcribe(chunk_path, language="ru")
+    segments = model.transcribe(chunk_path, language=langcodes.standardize_tag(source_language))
     adjusted_segments = adjust_subtitles(segments['segments'], speed_factor)
     with open(temp_srt_path, 'w', encoding='utf-8') as srt_file:
         for i, (start, end, text) in enumerate(adjusted_segments, start=1):
@@ -520,6 +532,16 @@ def transcribe_chunk(chunk_path, model):
             srt_file.write(f"{i}\n{start_time} --> {end_time}\n{text}\n\n")
     torch.cuda.empty_cache()
 
+
+def translate_srt(srt_path, target_lang):
+    translator = Translator(to_lang=langcodes.standardize_tag(target_lang))
+    with open(srt_path, 'r', encoding='utf-8') as f:
+        srt_content = f.read()
+    subtitles = list(srt.parse(srt_content))
+    for subtitle in tqdm(subtitles, desc="Перевод субтитров", unit="строка"):
+        subtitle.content = translator.translate(subtitle.content)
+    with open(srt_path, 'w', encoding='utf-8') as f:
+        f.write(srt.compose(subtitles))
 
 def transcribe_all_chunks():
     chunks = get_chunks()
@@ -552,8 +574,7 @@ def concatenate_srt_files():
             subtitle_counter = 1
             accumulated_time = 0.0
             for chunk in video_chunks:
-                temp_srt_path = os.path.join(TEMP_VIDEO_DIR,
-                                             f"{os.path.splitext(os.path.basename(chunk))[0]}_temp_srt.txt")
+                temp_srt_path = os.path.join(TEMP_VIDEO_DIR, f"{os.path.splitext(os.path.basename(chunk))[0]}_temp_srt.txt")
                 chunk_duration = get_video_duration_in_seconds(chunk) / speed_factor
                 if os.path.exists(temp_srt_path):
                     with open(temp_srt_path, 'r', encoding='utf-8', errors='replace') as temp_srt:
@@ -569,6 +590,8 @@ def concatenate_srt_files():
                 else:
                     print(f"SRT файл для {os.path.basename(chunk)} не найден.")
                 accumulated_time += chunk_duration
+            if need_translation:
+                translate_srt(final_srt_path, translation_language)
             print(f"Финальный файл субтитров сохранен как {os.path.basename(final_srt_path)}.")
     except (KeyboardInterrupt, subprocess.CalledProcessError):
         traceback.print_exc()
