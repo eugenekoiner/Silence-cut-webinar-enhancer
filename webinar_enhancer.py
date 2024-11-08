@@ -575,7 +575,7 @@ def concatenate_srt_files():
     video_chunks = get_chunks()
     try:
         with open(final_srt_path, 'w', encoding='utf-8') as final_srt:
-            subtitle_counter = 1  # Начинаем с 1 для каждого финального файла
+            subtitle_counter = 1
             accumulated_time = 0.0
             for chunk in video_chunks:
                 temp_srt_path = os.path.join(TEMP_VIDEO_DIR, f"{os.path.splitext(os.path.basename(chunk))[0]}_temp_srt.txt")
@@ -590,7 +590,7 @@ def concatenate_srt_files():
                                 end_time = add_time_to_timestamp(times[1], accumulated_time)
                                 final_srt.write(f"{subtitle_counter}\n{start_time} --> {end_time}\n")
                                 subtitle_counter += 1
-                            elif not line.strip().isdigit():  # Пропускаем номера
+                            elif not line.strip().isdigit():
                                 final_srt.write(line)
                 else:
                     print(f"SRT файл для {os.path.basename(chunk)} не найден.")
