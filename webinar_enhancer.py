@@ -58,7 +58,7 @@ video_file_name = None
 continue_counter = 0
 
 def initialize_params():
-    global speed_factor, offset_dB, silence_gap, result_bitrate, need_transcription, source_language, model_name, need_translation, translation_language
+    global silence_gap, offset_dB, speed_factor, need_transcription, source_language, model_name, need_translation, translation_language, result_bitrate
     DEFAULT_SPEED_FACTOR = 1.25
     DEFAULT_OFFSET_DB = 1
     DEFAULT_SILENCE_GAP = 0.5
@@ -84,15 +84,13 @@ def initialize_params():
         translation_language = config.get('translation_language', DEFAULT_TRANSLATION_LANGUAGE)
     else:
         print("Configuration file is not exist")
+        silence_gap = input(f"Min allowed silence gap ({DEFAULT_SILENCE_GAP} by default): ")
+        silence_gap = float(silence_gap) if silence_gap else DEFAULT_SILENCE_GAP
+        offset_dB = input(f"Silence threshold ({DEFAULT_OFFSET_DB} by default): ")
+        offset_dB = float(offset_dB) if offset_dB else DEFAULT_OFFSET_DB
         speed_factor = input(
             f"Speed up the video ({DEFAULT_SPEED_FACTOR} by default, 1 if no need to speed up): ")
         speed_factor = float(speed_factor) if speed_factor else DEFAULT_SPEED_FACTOR
-        offset_dB = input(f"Silence threshold ({DEFAULT_OFFSET_DB} by default): ")
-        offset_dB = float(offset_dB) if offset_dB else DEFAULT_OFFSET_DB
-        silence_gap = input(f"Min allowed silence gap ({DEFAULT_SILENCE_GAP} by default): ")
-        silence_gap = float(silence_gap) if silence_gap else DEFAULT_SILENCE_GAP
-        result_bitrate = input(
-            f"Final video bitrate ({DEFAULT_RESULT_BITRATE} by default): ") if result_bitrate else DEFAULT_RESULT_BITRATE
         need_transcription = input(
             f"Subtitles ({DEFAULT_NEED_TRANSCRIPTION} by default): ") or DEFAULT_NEED_TRANSCRIPTION
         source_language = input(
@@ -103,22 +101,24 @@ def initialize_params():
         # need_translation = input(f"Subtitle translation ({DEFAULT_NEED_TRANSLATION} by default): ") or DEFAULT_NEED_TRANSLATION if need_transcription == 'yes' else DEFAULT_NEED_TRANSLATION
         translation_language = input(
             f"Target language ({DEFAULT_TRANSLATION_LANGUAGE} by default): ") or DEFAULT_TRANSLATION_LANGUAGE if need_translation == 'yes' else DEFAULT_TRANSLATION_LANGUAGE
+        result_bitrate = input(
+            f"Final video bitrate ({DEFAULT_RESULT_BITRATE} by default): ") if result_bitrate else DEFAULT_RESULT_BITRATE
 
         config = {
-            'speed_factor': speed_factor,
-            'offset_dB': offset_dB,
             'silence_gap': silence_gap,
-            "result_bitrate": result_bitrate,
+            'offset_dB': offset_dB,
+            'speed_factor': speed_factor,
             'need_transcription': need_transcription,
             'source_language': source_language,
             'model_name': model_name,
             'need_translation': need_translation,
-            'translation_language': translation_language
+            'translation_language': translation_language,
+            "result_bitrate": result_bitrate
         }
         os.makedirs(os.path.dirname(CONFIG_FILE), exist_ok=True)
         with open(CONFIG_FILE, 'w', encoding='utf-8') as f:
             json.dump(config, f, indent=4)
-    return speed_factor, offset_dB, silence_gap, result_bitrate, need_transcription, source_language, model_name, need_translation, translation_language
+    return silence_gap, offset_dB, speed_factor, need_transcription, source_language, model_name, need_translation, translation_language, result_bitrate
 
 
 def clear_cache():
