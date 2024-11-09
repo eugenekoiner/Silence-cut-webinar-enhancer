@@ -77,18 +77,25 @@ def initialize_params():
         translation_language = config.get('translation_language', DEFAULT_TRANSLATION_LANGUAGE)
     else:
         print("Конфигурационный файл не найден. Введите параметры вручную.")
-        speed_factor = input(f"Во сколько вы хотите ускорить видео (1 если ускорение не нужно, по умолчанию {DEFAULT_SPEED_FACTOR}): ")
+        speed_factor = input(
+            f"Во сколько вы хотите ускорить видео (1 если ускорение не нужно, по умолчанию {DEFAULT_SPEED_FACTOR}): ")
         speed_factor = float(speed_factor) if speed_factor else DEFAULT_SPEED_FACTOR
         offset_dB = input(f"Настройки чувствительности тишины ({DEFAULT_OFFSET_DB} по умолчанию): ")
         offset_dB = float(offset_dB) if offset_dB else DEFAULT_OFFSET_DB
         silence_gap = input(f"Настройки ожидания тишины ({DEFAULT_SILENCE_GAP} по умолчанию): ")
         silence_gap = float(silence_gap) if silence_gap else DEFAULT_SILENCE_GAP
-        result_bitrate = input(f"Введите значение битрейта для финального видео (по умолчанию {DEFAULT_RESULT_BITRATE}): ") if result_bitrate else DEFAULT_RESULT_BITRATE
-        need_transcription = input(f"Нужны ли субтитры ({DEFAULT_NEED_TRANSCRIPTION} по умолчанию): ") or DEFAULT_NEED_TRANSCRIPTION
-        source_language = input(f"Введите язык исходника (по умолчанию '{DEFAULT_SOURCE_LANGUAGE}'): ") or DEFAULT_NEED_TRANSCRIPTION if need_transcription == 'yes' else DEFAULT_SOURCE_LANGUAGE
-        model_name = input(f"Введите название модели (по умолчанию '{DEFAULT_MODEL_NAME}'): ") or DEFAULT_MODEL_NAME if need_transcription == 'yes' else DEFAULT_MODEL_NAME
-        need_translation = input(f"Нужен ли перевод ({DEFAULT_NEED_TRANSLATION} по умолчанию): ") or DEFAULT_NEED_TRANSLATION if need_transcription == 'yes' else DEFAULT_NEED_TRANSLATION
-        translation_language = input(f"На какой язык переводить ({DEFAULT_TRANSLATION_LANGUAGE} по умолчанию): ") or DEFAULT_TRANSLATION_LANGUAGE if need_translation == 'yes' else DEFAULT_TRANSLATION_LANGUAGE
+        result_bitrate = input(
+            f"Введите значение битрейта для финального видео (по умолчанию {DEFAULT_RESULT_BITRATE}): ") if result_bitrate else DEFAULT_RESULT_BITRATE
+        need_transcription = input(
+            f"Нужны ли субтитры ({DEFAULT_NEED_TRANSCRIPTION} по умолчанию): ") or DEFAULT_NEED_TRANSCRIPTION
+        source_language = input(
+            f"Введите язык исходника (по умолчанию '{DEFAULT_SOURCE_LANGUAGE}'): ") or DEFAULT_NEED_TRANSCRIPTION if need_transcription == 'yes' else DEFAULT_SOURCE_LANGUAGE
+        model_name = input(
+            f"Введите название модели (по умолчанию '{DEFAULT_MODEL_NAME}'): ") or DEFAULT_MODEL_NAME if need_transcription == 'yes' else DEFAULT_MODEL_NAME
+        need_translation = DEFAULT_NEED_TRANSLATION
+        # need_translation = input(f"Нужен ли перевод ({DEFAULT_NEED_TRANSLATION} по умолчанию): ") or DEFAULT_NEED_TRANSLATION if need_transcription == 'yes' else DEFAULT_NEED_TRANSLATION
+        translation_language = input(
+            f"На какой язык переводить ({DEFAULT_TRANSLATION_LANGUAGE} по умолчанию): ") or DEFAULT_TRANSLATION_LANGUAGE if need_translation == 'yes' else DEFAULT_TRANSLATION_LANGUAGE
 
         config = {
             'speed_factor': speed_factor,
@@ -527,7 +534,8 @@ def transcribe_chunk(chunk_path, model):
     temp_srt_path = os.path.join(TEMP_VIDEO_DIR, f"{os.path.splitext(os.path.basename(chunk_path))[0]}_temp_srt.txt")
     if os.path.exists(temp_srt_path):
         return
-    segments = model.transcribe(chunk_path, language=pycountry.languages.get(name=source_language.strip().capitalize()).alpha_2)
+    segments = model.transcribe(chunk_path,
+                                language=pycountry.languages.get(name=source_language.strip().capitalize()).alpha_2)
     adjusted_segments = adjust_subtitles(segments['segments'], speed_factor)
     with open(temp_srt_path, 'w', encoding='utf-8') as srt_file:
         for i, (start, end, text) in enumerate(adjusted_segments, start=1):
@@ -546,6 +554,7 @@ def translate_srt(srt_path, target_lang):
         subtitle.content = translator.translate(subtitle.content)
     with open(srt_path, 'w', encoding='utf-8') as f:
         f.write(srt.compose(subtitles))
+
 
 def transcribe_all_chunks():
     chunks = get_chunks()
@@ -578,7 +587,8 @@ def concatenate_srt_files():
             subtitle_counter = 1
             accumulated_time = 0.0
             for chunk in video_chunks:
-                temp_srt_path = os.path.join(TEMP_VIDEO_DIR, f"{os.path.splitext(os.path.basename(chunk))[0]}_temp_srt.txt")
+                temp_srt_path = os.path.join(TEMP_VIDEO_DIR,
+                                             f"{os.path.splitext(os.path.basename(chunk))[0]}_temp_srt.txt")
                 chunk_duration = get_video_duration_in_seconds(chunk) / speed_factor
                 if os.path.exists(temp_srt_path):
                     with open(temp_srt_path, 'r', encoding='utf-8', errors='replace') as temp_srt:
@@ -602,7 +612,6 @@ def concatenate_srt_files():
         traceback.print_exc()
         if os.path.exists(final_srt_path):
             os.remove(final_srt_path)
-
 
 
 def add_time_to_timestamp(timestamp, accumulated_time):
