@@ -74,7 +74,7 @@ You can adjust the following parameters:
 - **Transcription**: Choose whether you want transcription (subtitles). Set to `yes` to enable.
 - **Language Settings**: Set the source language for transcription and choose a Whisper model if needed.
 
-## Good to know:
+## Good to know
 
 - After answering these questions, the script will create a configuration file in the `.config` directory with your choices.
 - In the future, if you wish to change any settings, you can simply edit this configuration file manually.
