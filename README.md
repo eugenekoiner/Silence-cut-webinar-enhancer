@@ -2,7 +2,7 @@
 
 This Python script was created out of frustration with the time wasted during long video lectures or webinars. I often found myself spending hours watching videos where there were long pauses or slow-paced sections. The idea behind this script is simple — **remove silences and speed up the video** to save time.
 
-By trimming out unnecessary pauses and speeding up the video (at least 1.25x), the script can reduce the overall length of the video by **30-50%**, with 45% reduction being more common in my tests. This makes it ideal for long educational videos, tutorials, or webinars where the content is usually delivered at a slow pace.
+By trimming out unnecessary pauses and speeding up the video (at least 1.25x), the script can reduce the overall length of the video by 30-50%, with a 45% reduction being more common in my tests (almost cutting the duration in half!). This makes it ideal for long educational videos, tutorials, or webinars where the content is usually delivered at a slow pace.
 ## Features
 
 - **Silence Removal**: Automatically detects and removes silent sections from videos.
