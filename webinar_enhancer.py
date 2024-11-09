@@ -1,5 +1,6 @@
 import os
 import json
+import sys
 import time
 import threading
 import subprocess
@@ -16,6 +17,13 @@ import tempfile
 import pycountry
 from translate import Translator
 import srt
+
+def install_and_import(package):
+    try:
+        __import__(package)
+    except ImportError:
+        print(f"Installing {package}...")
+        subprocess.check_call([sys.executable, "-m", "pip", "install", package])
 
 video_path = None
 speed_factor = None
@@ -49,7 +57,6 @@ final_srt_path = None
 video_file_name = None
 continue_counter = 0
 
-
 def initialize_params():
     global speed_factor, offset_dB, silence_gap, result_bitrate, need_transcription, source_language, model_name, need_translation, translation_language
     DEFAULT_SPEED_FACTOR = 1.25
@@ -63,7 +70,7 @@ def initialize_params():
     DEFAULT_TRANSLATION_LANGUAGE = "russian"
 
     if os.path.exists(CONFIG_FILE):
-        print(f"Загрузка конфигурации из файла {os.path.basename(CONFIG_FILE)}...")
+        print(f"Loading configuration from file {os.path.basename(CONFIG_FILE)}...")
         with open(CONFIG_FILE, 'r', encoding='utf-8') as f:
             config = json.load(f)
         speed_factor = config.get('speed_factor', DEFAULT_SPEED_FACTOR)
@@ -76,26 +83,26 @@ def initialize_params():
         need_translation = config.get('need_translation', DEFAULT_NEED_TRANSLATION)
         translation_language = config.get('translation_language', DEFAULT_TRANSLATION_LANGUAGE)
     else:
-        print("Конфигурационный файл не найден. Введите параметры вручную.")
+        print("Configuration file is not exist")
         speed_factor = input(
-            f"Во сколько вы хотите ускорить видео (1 если ускорение не нужно, по умолчанию {DEFAULT_SPEED_FACTOR}): ")
+            f"Speed up the video ({DEFAULT_SPEED_FACTOR} by default, 1 if no need to speed up): ")
         speed_factor = float(speed_factor) if speed_factor else DEFAULT_SPEED_FACTOR
-        offset_dB = input(f"Настройки чувствительности тишины ({DEFAULT_OFFSET_DB} по умолчанию): ")
+        offset_dB = input(f"Silence threshold ({DEFAULT_OFFSET_DB} by default): ")
         offset_dB = float(offset_dB) if offset_dB else DEFAULT_OFFSET_DB
-        silence_gap = input(f"Настройки ожидания тишины ({DEFAULT_SILENCE_GAP} по умолчанию): ")
+        silence_gap = input(f"Min allowed silence gap ({DEFAULT_SILENCE_GAP} by default): ")
         silence_gap = float(silence_gap) if silence_gap else DEFAULT_SILENCE_GAP
         result_bitrate = input(
-            f"Введите значение битрейта для финального видео (по умолчанию {DEFAULT_RESULT_BITRATE}): ") if result_bitrate else DEFAULT_RESULT_BITRATE
+            f"Final video bitrate ({DEFAULT_RESULT_BITRATE} by default): ") if result_bitrate else DEFAULT_RESULT_BITRATE
         need_transcription = input(
-            f"Нужны ли субтитры ({DEFAULT_NEED_TRANSCRIPTION} по умолчанию): ") or DEFAULT_NEED_TRANSCRIPTION
+            f"Subtitles ({DEFAULT_NEED_TRANSCRIPTION} by default): ") or DEFAULT_NEED_TRANSCRIPTION
         source_language = input(
-            f"Введите язык исходника (по умолчанию '{DEFAULT_SOURCE_LANGUAGE}'): ") or DEFAULT_NEED_TRANSCRIPTION if need_transcription == 'yes' else DEFAULT_SOURCE_LANGUAGE
+            f"Source video language ({DEFAULT_SOURCE_LANGUAGE} by default): ") or DEFAULT_NEED_TRANSCRIPTION if need_transcription == 'yes' else DEFAULT_SOURCE_LANGUAGE
         model_name = input(
-            f"Введите название модели (по умолчанию '{DEFAULT_MODEL_NAME}'): ") or DEFAULT_MODEL_NAME if need_transcription == 'yes' else DEFAULT_MODEL_NAME
+            f"Whisper model name ({DEFAULT_MODEL_NAME} by default): ") or DEFAULT_MODEL_NAME if need_transcription == 'yes' else DEFAULT_MODEL_NAME
         need_translation = DEFAULT_NEED_TRANSLATION
-        # need_translation = input(f"Нужен ли перевод ({DEFAULT_NEED_TRANSLATION} по умолчанию): ") or DEFAULT_NEED_TRANSLATION if need_transcription == 'yes' else DEFAULT_NEED_TRANSLATION
+        # need_translation = input(f"Subtitle translation ({DEFAULT_NEED_TRANSLATION} by default): ") or DEFAULT_NEED_TRANSLATION if need_transcription == 'yes' else DEFAULT_NEED_TRANSLATION
         translation_language = input(
-            f"На какой язык переводить ({DEFAULT_TRANSLATION_LANGUAGE} по умолчанию): ") or DEFAULT_TRANSLATION_LANGUAGE if need_translation == 'yes' else DEFAULT_TRANSLATION_LANGUAGE
+            f"Target language ({DEFAULT_TRANSLATION_LANGUAGE} by default): ") or DEFAULT_TRANSLATION_LANGUAGE if need_translation == 'yes' else DEFAULT_TRANSLATION_LANGUAGE
 
         config = {
             'speed_factor': speed_factor,
@@ -121,19 +128,19 @@ def clear_cache():
             try:
                 shutil.rmtree(path) if os.path.isdir(path) else os.unlink(path)
             except Exception as e:
-                print(f'Ошибка при удалении {path}: {e}')
+                print(f'Error {path}: {e}')
 
 
 def onetime_print():
     global continue_counter
     if continue_counter == 0:
-        print('Продолжаем с места последней остановки.')
+        print('Continuing...')
         continue_counter += 1
 
 
 def load_model():
     device = "cuda" if torch.cuda.is_available() else "cpu"
-    print(f"Инициализация Whisper. Модель \"{model_name}\". Используется {device}.")
+    print(f"Whisper initializing. Model \"{model_name}\". Using {device}.")
     model = whisper.load_model(model_name, device=device, download_root=MODEL_DIR)
     return model
 
@@ -150,7 +157,7 @@ def read_stderr(process, log_container):
 def timer_thread(start_time, stop_event, progress_bar):
     while not stop_event.is_set():
         elapsed_time = time.time() - start_time
-        progress_bar.set_postfix_str(f"Прошло времени: {time.strftime('%H:%M:%S', time.gmtime(elapsed_time))}")
+        progress_bar.set_postfix_str(f"Time passed: {time.strftime('%H:%M:%S', time.gmtime(elapsed_time))}")
         time.sleep(1)
 
 
@@ -191,7 +198,7 @@ def get_silence_threshold(TEMP_VIDEO_DIR, input_path):
                 f.write(str(threshold))
             return threshold
         else:
-            print("Не удалось найти 'Threshold' в логах.")
+            print("Couldn't find 'Threshold' in file")
             return None
     except (KeyboardInterrupt, subprocess.CalledProcessError, Exception):
         raise
@@ -209,7 +216,7 @@ def analyze_audio(TEMP_VIDEO_DIR, offset_dB, input_path, save_name=None, get_non
         return intervals
     loudness = get_silence_threshold(TEMP_VIDEO_DIR, input_path)
     if loudness is None:
-        raise RuntimeError("Не удалось определить порог тишины файла.")
+        raise RuntimeError("Couldn't get silence of the file")
     silence_threshold = loudness + offset_dB
     with tempfile.NamedTemporaryFile(delete=False, suffix='.log', dir=TEMP_VIDEO_DIR) as temp_file:
         log_file_path = temp_file.name
@@ -221,7 +228,7 @@ def analyze_audio(TEMP_VIDEO_DIR, offset_dB, input_path, save_name=None, get_non
     ]
     process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, universal_newlines=True)
     threading.Thread(target=ffmpeg_progress,
-                     args=(process, video_duration, f"Поиск отрезков тишины {save_name}")).start()
+                     args=(process, video_duration, f"Searching silence for {save_name}")).start()
     with open(log_file_path, 'w', encoding='utf-8') as log_file:
         while True:
             line = process.stderr.readline()
@@ -288,7 +295,7 @@ def get_video_duration_in_seconds(input_path):
         '-of', 'default=noprint_wrappers=1:nokey=1', input_path
     ]
     result = float(subprocess.run(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-                                  universal_newlines=True).stdout.strip())  # в секундах
+                                  universal_newlines=True).stdout.strip())
     return result
 
 
@@ -391,7 +398,7 @@ def concatenate_chunks():
     video_chunks = get_chunks()
     if not video_chunks:
         raise FileNotFoundError(
-            f"Видео файлы по шаблону {os.path.splitext(video_file_name)[0]}_chunk_*_no_silence.mp4 не найдены в {TEMP_VIDEO_DIR}.")
+            f"Couldn't find video files using template {os.path.splitext(video_file_name)[0]}_chunk_*_no_silence.mp4 in {TEMP_VIDEO_DIR}")
     concat_file_path = os.path.join(TEMP_VIDEO_DIR, f'{os.path.splitext(video_file_name)[0]}_concat_list.txt')
     if not os.path.exists(concat_file_path):
         with open(concat_file_path, 'w', encoding='cp1251') as concat_file:
@@ -403,16 +410,16 @@ def concatenate_chunks():
     ]
     total_duration_seconds = sum(get_video_duration_in_seconds(chunk) for chunk in video_chunks)
     process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, universal_newlines=True)
-    message = f"Соединение видеофрагментов для {video_file_name}"
+    message = f"Merging {video_file_name}"
     try:
         ffmpeg_progress(process, total_duration_seconds, message)
     except (KeyboardInterrupt, subprocess.CalledProcessError) as e:
         if not KeyboardInterrupt:
-            print(f"Ошибка при соединении фрагментов: {e.stderr}")
+            print(f"Merging error: {e.stderr}")
         if (process.returncode is not None and process.returncode != 0) or process.poll() is None:
             if os.path.exists(output_file):
                 os.remove(output_file)
-                print(f"Файл {os.path.basename(output_file)} удален из-за ошибки.")
+                print(f"Error. File {os.path.basename(output_file)} has been removed")
         raise
     return output_file
 
@@ -453,7 +460,7 @@ def remove_silence_using_metadata(input_path, output_path, TEMP_VIDEO_DIR):
         with open(intervals_file_path, 'r', encoding='utf-8') as f:
             non_silence_intervals = json.load(f)
     if not non_silence_intervals:
-        print("Тишина не найдена. Используется исходное видео.")
+        print("No silence found. Using original video.")
         command = ['ffmpeg', '-loglevel', 'quiet', '-i', input_path, '-c', 'copy', output_path]
         subprocess.run(command, check=True)
         return
@@ -463,7 +470,7 @@ def remove_silence_using_metadata(input_path, output_path, TEMP_VIDEO_DIR):
         for idx, (start, end) in enumerate(non_silence_intervals)
     ])
     if not filter_complex:
-        raise ValueError("Фильтр для удаления тишины пустой.")
+        raise ValueError("Silence filter is empty.")
     concat_inputs = ''.join([f"[v{idx}][a{idx}]" for idx in range(len(non_silence_intervals))])
     filter_complex += f"{concat_inputs}concat=n={len(non_silence_intervals)}:v=1:a=1[v][a]"
     filter_file_path = os.path.join(TEMP_VIDEO_DIR,
@@ -480,15 +487,15 @@ def remove_silence_using_metadata(input_path, output_path, TEMP_VIDEO_DIR):
         output_path
     ]
     process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, universal_newlines=True)
-    message = f"Удаление тишины в {os.path.basename(input_path)}"
+    message = f"Removing silence for {os.path.basename(input_path)}"
     try:
         ffmpeg_progress(process, calculate_remaining_duration(non_silence_intervals), message)
     except (KeyboardInterrupt, subprocess.CalledProcessError) as e:
-        print(f"Ошибка при выполнении ffmpeg: {e.stderr}")
+        print(f"Ffmpeg error: {e.stderr}")
         if (process.returncode is not None and process.returncode != 0) or process.poll() is None:
             if os.path.exists(output_path):
                 os.remove(output_path)
-                print(f"Файл {os.path.basename(output_path)} удален из-за ошибки.")
+                print(f"Error. File {os.path.basename(output_path)} has been removed")
         raise
 
 
@@ -550,7 +557,7 @@ def translate_srt(srt_path, target_lang):
     with open(srt_path, 'r', encoding='utf-8') as f:
         srt_content = f.read()
     subtitles = list(srt.parse(srt_content))
-    for subtitle in tqdm(subtitles, desc="Перевод субтитров", unit="строка"):
+    for subtitle in tqdm(subtitles, desc="Translating subs", unit="line"):
         subtitle.content = translator.translate(subtitle.content)
     with open(srt_path, 'w', encoding='utf-8') as f:
         f.write(srt.compose(subtitles))
@@ -561,12 +568,10 @@ def transcribe_all_chunks():
     pattern = re.compile(rf"{re.escape(os.path.splitext(video_file_name)[0])}_chunk_(\d+)_no_silence_temp_srt\.txt")
     if not len(get_temp_txts(pattern)) == len(chunks):
         model = load_model()
-        print(
-            'Поскольку whisper не отдает прогресса до момента полного выполнения, может казаться что ничего не происходит.')
-        print('Прогресс бар может обновляться раз в несколько минут.')
+        print('Please wait. The progress bar may update every few minutes because Whisper does not return progress')
         start_time = time.time()
         stop_event = threading.Event()
-        with tqdm(total=len(chunks), desc="Транскрибация", unit="chunk", leave=True, ncols=100,
+        with tqdm(total=len(chunks), desc="Transcription", unit="chunk", leave=True, ncols=100,
                   bar_format='{l_bar}{bar}| {n_fmt}/{total_fmt} [{postfix}]') as pbar:
             timer = threading.Thread(target=timer_thread, args=(start_time, stop_event, pbar))
             timer.start()
@@ -577,7 +582,7 @@ def transcribe_all_chunks():
             timer.join()
         end_time = time.time()
         total_time = end_time - start_time
-        print(f"\nОбщее время транскрибации: {time.strftime('%H:%M:%S', time.gmtime(total_time))}")
+        print(f"\nTranscription time: {time.strftime('%H:%M:%S', time.gmtime(total_time))}")
 
 
 def concatenate_srt_files():
@@ -603,11 +608,11 @@ def concatenate_srt_files():
                             elif not line.strip().isdigit():
                                 final_srt.write(line)
                 else:
-                    print(f"SRT файл для {os.path.basename(chunk)} не найден.")
+                    print(f"Couldn't find SRT file for {os.path.basename(chunk)}")
                 accumulated_time += chunk_duration
             # if need_translation:
             #     translate_srt(final_srt_path, translation_language)
-            print(f"Финальный файл субтитров сохранен как {os.path.basename(final_srt_path)}.")
+            print(f"Final srt file saved as {os.path.basename(final_srt_path)}")
     except (KeyboardInterrupt, subprocess.CalledProcessError):
         traceback.print_exc()
         if os.path.exists(final_srt_path):
@@ -622,7 +627,7 @@ def add_time_to_timestamp(timestamp, accumulated_time):
 
 def speed_up_video(input_path, output_path, speed_factor):
     if os.path.exists(output_path):
-        print(f"Финальный файл {os.path.basename(output_path)} уже существует.")
+        print(f"Final file {os.path.basename(output_path)} is already exists")
         return
     command = [
         'ffmpeg', '-loglevel', 'quiet', '-i', input_path,
@@ -635,20 +640,23 @@ def speed_up_video(input_path, output_path, speed_factor):
     ]
     try:
         process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, universal_newlines=True)
-        message = "Ускорение видео"
+        message = "Speeding up the video"
         ffmpeg_progress(process, get_video_duration_in_seconds(temp_no_silence_video) / speed_factor, message)
     except (KeyboardInterrupt, subprocess.CalledProcessError) as e:
         if not KeyboardInterrupt:
-            print(f"Ошибка при выполнении ffmpeg: {e.stderr}")
+            print(f"Ffmpeg error: {e.stderr}")
         if (process.returncode is not None and process.returncode != 0) or process.poll() is None:
             if os.path.exists(output_path):
                 os.remove(output_path)
-                print(f"Файл {os.path.basename(output_path)} удален из-за ошибки.")
+                print(f"Error. File {os.path.basename(output_path)} has been removed")
         raise
 
 
 def main():
     initialize_params()
+    required_packages = ["torch", "whisper", "tqdm", "translate", "srt"]
+    for package in required_packages:
+        install_and_import(package)
     global video_path
     global TEMP_VIDEO_DIR
     global temp_no_silence_video
@@ -656,12 +664,12 @@ def main():
     global final_srt_path
     global video_file_name
     try:
-        video_file_name = input("Введите название видеофайла (с расширением): ")
+        video_file_name = input("Enter the name of the source file (with extension): ")
         start_time = time.time()
         final_video_path = os.path.join(OUTPUT_DIR, os.path.splitext(video_file_name)[0] + "_output.mp4")
         final_srt_path = os.path.join(OUTPUT_DIR, os.path.splitext(video_file_name)[0] + "_output.srt")
         if os.path.exists(final_video_path) and os.path.exists(final_srt_path):
-            print(f"Финальный файл {os.path.basename(final_video_path)} уже существует.")
+            print(f"Final file {os.path.basename(final_video_path)} is already exists")
             return
         TEMP_VIDEO_DIR = os.path.join(TEMP_DIR, os.path.splitext(video_file_name)[0])
         clear_cache()
@@ -671,8 +679,8 @@ def main():
         temp_no_silence_video = os.path.join(TEMP_VIDEO_DIR,
                                              f'{os.path.splitext(video_file_name)[0]}_final_no_silence.mp4')
         if not os.path.exists(video_path):
-            raise FileNotFoundError("Файл не найден. Проверьте путь и имя файла в папке .source.")
-        print('Длительность видео', datetime.timedelta(seconds=int(get_video_duration_in_seconds(video_path))))
+            raise FileNotFoundError("File has not been found. Check the name and path in the .source folder")
+        print('Video duration', datetime.timedelta(seconds=int(get_video_duration_in_seconds(video_path))))
         if get_video_duration_in_seconds(video_path) > 20 * 60:
             video_chunks = get_chunks(silence=False)
             if not video_chunks:
@@ -697,15 +705,15 @@ def main():
         else:
             output_path = os.path.join(OUTPUT_DIR, f"{os.path.splitext(video_file_name)[0]}_processed.mp4")
             os.rename(temp_no_silence_video, output_path)
-        print("Готово!")
+        print("Done!")
         end_time = time.time()
         elapsed_time = end_time - start_time
         formatted_time = time.strftime("%H:%M:%S", time.gmtime(elapsed_time))
-        print(f"Затраченное время на обработку видеофайла: {formatted_time}")
+        print(f"Time taken to process the video file: {formatted_time}")
     except KeyboardInterrupt:
-        print("\nПрервано пользователем.")
+        print("\nInterrupted by user")
     except Exception as e:
-        print(f"Произошла ошибка: {e}")
+        print(f"Error: {e}")
         traceback.print_exc()
 
 
