@@ -183,7 +183,7 @@ def get_silence_threshold(TEMP_VIDEO_DIR, input_path):
             '-af', 'ebur128', '-f', 'null', '-',
             '-progress', 'pipe:1'
         ]
-        message = f"Анализ {os.path.basename(input_path)}"
+        message = f"Analyzing {os.path.basename(input_path)}"
         process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, universal_newlines=True)
         loudness_log = []
         stderr_thread = threading.Thread(target=read_stderr, args=(process, loudness_log))
