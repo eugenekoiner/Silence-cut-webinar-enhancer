@@ -34,12 +34,14 @@ For videos longer than 20 minutes, the script uses ffmpeg to detect the longest 
    
 4. **Optional Transcription with Whisper**:  
 	- If needed, each chunk of the video can be transcribed into text using **Whisper**, an AI-powered transcription model by OpenAI. The script utilizes your **NVIDIA GPU** for fast transcription (or your CPU if you don’t have a GPU, though it will take longer). You can choose the specific language and transcription model for this step, allowing you to generate accurate transcriptions for each segment of the video. This feature is useful if you want to generate a **subtitle file** from the video, or if you plan to perform **text-based search** through the video content.
+5.  **Merging Subtitle Segments**:
+   	- Once Whisper completes processing each segment, all transcriptions are merged into a single SRT file in the `.output` folder. The timing in the final SRT file is adjusted according to the previously set video speed factor.
 
-5. **Merging Video Segments**:  
+6. **Merging Video Segments**:  
 	- Once silence is removed and transcription (if enabled) is completed, the script automatically merges the individual video segments into one intermediate file.
 
-6. **Speed Adjustment**:  
-	- After cleaning up the video, the script offers the option to apply a speed adjustment. By default, the video speed is increased by 1.25x, based on the observation that speakers in many webinars tend to speak slowly with long pauses. This slight speed boost helps bring the video closer to a more natural speaking pace, without impacting comprehension. However, this speed adjustment is optional: you can choose to apply the default 1.25x speed, or you can enter a value of `1` by changing the `speed_factor` parameter to keep the original speed without any changes.
+7. **Speed Adjustment**:  
+	- After processing the video, the script provides an option to apply a speed adjustment, with a default of 1.25x. This adjustment is optional: you can keep the default 1.25x speed or set the speed_factor parameter to 1 to retain the original speed. This is the final step, and the completed video will be saved in the .output folder.
 
 </details>
 
@@ -82,6 +84,7 @@ You can adjust the following parameters:
 - A 300k bitrate is sufficient for 720p video to ensure clear visibility, even in coding tutorials, while keeping the file size small.
 - The source videos should be placed in the `.source` folder, and all necessary directories will be automatically created during the first run of the script.
 - The Silence Threshold Offset is set to 1 by default, which means the calculated silence threshold for each video segment is raised by a value of 1. This results in slightly shorter silent sections being removed between words, but it keeps the beginnings and ends of words more intact. Through experimentation, a value of 1 proved optimal; reducing the offset causes words to merge together.
+- By default, the video speed is increased by 1.25x, based on the observation that speakers in many webinars tend to speak slowly with long pauses. This slight speed boost helps bring the video closer to a more natural speaking pace, without impacting comprehension.
 - The script uses multithreaded processing wherever possible.
 - Sometimes, certain video files are processed oddly by ffmpeg: after splitting a long file into segments and then merging them back together, there may be slight audio sync issues or a single frame freeze at certain points. This only lasts within one segment and resolves in the next. It’s a rare issue and generally doesn’t disrupt the overall video, though I haven’t identified the exact cause.
 
