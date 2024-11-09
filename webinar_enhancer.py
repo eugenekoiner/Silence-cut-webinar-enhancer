@@ -129,14 +129,7 @@ def clear_cache():
                 shutil.rmtree(path) if os.path.isdir(path) else os.unlink(path)
             except Exception as e:
                 print(f'Error {path}: {e}')
-
-
-def onetime_print():
-    global continue_counter
-    if continue_counter == 0:
-        print('Continuing...')
-        continue_counter += 1
-
+                raise
 
 def load_model():
     device = "cuda" if torch.cuda.is_available() else "cpu"
@@ -226,37 +219,45 @@ def analyze_audio(TEMP_VIDEO_DIR, offset_dB, input_path, save_name=None, get_non
         '-f', 'null', '-',
         '-progress', 'pipe:1'
     ]
-    process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, universal_newlines=True)
-    threading.Thread(target=ffmpeg_progress,
-                     args=(process, video_duration, f"Searching silence for {save_name}")).start()
-    with open(log_file_path, 'w', encoding='utf-8') as log_file:
-        while True:
-            line = process.stderr.readline()
-            if not line:
-                break
-            log_file.write(line)
-    process.wait()
-    with open(log_file_path, 'r', encoding='utf-8') as log_file:
-        silence_log_str = log_file.read()
-    silence_intervals, non_silence_intervals = [], []
-    start_time = 0.0
-    for line in silence_log_str.split('\n'):
-        start_match = re.search(r'silence_start:\s*([\d.]+)', line)
-        if start_match:
-            end_time = float(start_match.group(1))
-            non_silence_intervals.append((start_time, end_time))
-            silence_intervals.append((end_time, None))
-        end_match = re.search(r'silence_end:\s*([\d.]+)', line)
-        if end_match:
-            start_time = float(end_match.group(1))
-            if silence_intervals and silence_intervals[-1][1] is None:
-                silence_intervals[-1] = (silence_intervals[-1][0], start_time)
-    if start_time is not None and video_duration - start_time > 5:
-        non_silence_intervals.append((start_time, video_duration))
-    intervals = non_silence_intervals if get_non_silence else silence_intervals
-    with open(intervals_file_path, 'w', encoding='utf-8') as f:
-        json.dump(intervals, f)
-    os.remove(log_file_path)
+    try:
+        process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, universal_newlines=True)
+        threading.Thread(target=ffmpeg_progress,
+                         args=(process, video_duration, f"Searching silence for {save_name}")).start()
+        with open(log_file_path, 'w', encoding='utf-8') as log_file:
+            while True:
+                line = process.stderr.readline()
+                if not line:
+                    break
+                log_file.write(line)
+        process.wait()
+        with open(log_file_path, 'r', encoding='utf-8') as log_file:
+            silence_log_str = log_file.read()
+        silence_intervals, non_silence_intervals = [], []
+        start_time = 0.0
+        for line in silence_log_str.split('\n'):
+            start_match = re.search(r'silence_start:\s*([\d.]+)', line)
+            if start_match:
+                end_time = float(start_match.group(1))
+                non_silence_intervals.append((start_time, end_time))
+                silence_intervals.append((end_time, None))
+            end_match = re.search(r'silence_end:\s*([\d.]+)', line)
+            if end_match:
+                start_time = float(end_match.group(1))
+                if silence_intervals and silence_intervals[-1][1] is None:
+                    silence_intervals[-1] = (silence_intervals[-1][0], start_time)
+        if start_time is not None and video_duration - start_time > 5:
+            non_silence_intervals.append((start_time, video_duration))
+        intervals = non_silence_intervals if get_non_silence else silence_intervals
+        with open(intervals_file_path, 'w', encoding='utf-8') as f:
+            json.dump(intervals, f)
+        os.remove(log_file_path)
+    except (KeyboardInterrupt, subprocess.CalledProcessError, Exception):
+        process.terminate()
+        process.wait()
+        if os.path.exists(intervals_file_path):
+            os.remove(intervals_file_path)
+            print(f"Interrupted. File {os.path.basename(intervals_file_path)} has been removed")
+        raise
     return intervals
 
 
@@ -419,7 +420,7 @@ def concatenate_chunks():
         if (process.returncode is not None and process.returncode != 0) or process.poll() is None:
             if os.path.exists(output_file):
                 os.remove(output_file)
-                print(f"Error. File {os.path.basename(output_file)} has been removed")
+                print(f"Interrupted. File {os.path.basename(output_file)} has been removed")
         raise
     return output_file
 
@@ -486,16 +487,16 @@ def remove_silence_using_metadata(input_path, output_path, TEMP_VIDEO_DIR):
         '-progress', 'pipe:1',
         output_path
     ]
-    process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, universal_newlines=True)
-    message = f"Removing silence for {os.path.basename(input_path)}"
     try:
+        process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, universal_newlines=True)
+        message = f"Removing silence for {os.path.basename(input_path)}"
         ffmpeg_progress(process, calculate_remaining_duration(non_silence_intervals), message)
     except (KeyboardInterrupt, subprocess.CalledProcessError) as e:
-        print(f"Ffmpeg error: {e.stderr}")
-        if (process.returncode is not None and process.returncode != 0) or process.poll() is None:
-            if os.path.exists(output_path):
-                os.remove(output_path)
-                print(f"Error. File {os.path.basename(output_path)} has been removed")
+        process.terminate()
+        process.wait()
+        if os.path.exists(output_path):
+            os.remove(output_path)
+            print(f"Interrupted. File {os.path.basename(output_path)} has been removed")
         raise
 
 
@@ -617,6 +618,7 @@ def concatenate_srt_files():
         traceback.print_exc()
         if os.path.exists(final_srt_path):
             os.remove(final_srt_path)
+        raise
 
 
 def add_time_to_timestamp(timestamp, accumulated_time):
@@ -648,7 +650,7 @@ def speed_up_video(input_path, output_path, speed_factor):
         if (process.returncode is not None and process.returncode != 0) or process.poll() is None:
             if os.path.exists(output_path):
                 os.remove(output_path)
-                print(f"Error. File {os.path.basename(output_path)} has been removed")
+                print(f"Interrupted. File {os.path.basename(output_path)} has been removed")
         raise
 
 
@@ -665,21 +667,23 @@ def main():
     global video_file_name
     try:
         video_file_name = input("Enter the name of the source file (with extension): ")
+        video_path = os.path.join(SOURCE_DIR, video_file_name)
+        if not os.path.exists(video_path):
+            raise FileNotFoundError("File has not been found. Check the name and path in the .source folder")
+        TEMP_VIDEO_DIR = os.path.join(TEMP_DIR, os.path.splitext(video_file_name)[0])
+        clear_cache()
         start_time = time.time()
         final_video_path = os.path.join(OUTPUT_DIR, os.path.splitext(video_file_name)[0] + "_output.mp4")
         final_srt_path = os.path.join(OUTPUT_DIR, os.path.splitext(video_file_name)[0] + "_output.srt")
         if os.path.exists(final_video_path) and os.path.exists(final_srt_path):
             print(f"Final file {os.path.basename(final_video_path)} is already exists")
             return
-        TEMP_VIDEO_DIR = os.path.join(TEMP_DIR, os.path.splitext(video_file_name)[0])
-        clear_cache()
+
         os.makedirs(TEMP_VIDEO_DIR, exist_ok=True)
-        video_path = os.path.join(SOURCE_DIR, video_file_name)
+
 
         temp_no_silence_video = os.path.join(TEMP_VIDEO_DIR,
                                              f'{os.path.splitext(video_file_name)[0]}_final_no_silence.mp4')
-        if not os.path.exists(video_path):
-            raise FileNotFoundError("File has not been found. Check the name and path in the .source folder")
         print('Video duration', datetime.timedelta(seconds=int(get_video_duration_in_seconds(video_path))))
         if get_video_duration_in_seconds(video_path) > 20 * 60:
             video_chunks = get_chunks(silence=False)
@@ -712,6 +716,8 @@ def main():
         print(f"Time taken to process the video file: {formatted_time}")
     except KeyboardInterrupt:
         print("\nInterrupted by user")
+    except FileNotFoundError as e:
+        print(f"Error: {e}")
     except Exception as e:
         print(f"Error: {e}")
         traceback.print_exc()
