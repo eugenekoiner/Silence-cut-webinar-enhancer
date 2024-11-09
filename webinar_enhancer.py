@@ -533,7 +533,10 @@ def remove_silence_from_chunks(chunks):
         }
         for future in as_completed(futures):
             idx = futures[future]
-            processed_chunks[idx] = future.result()
+            try:
+                processed_chunks[idx] = future.result()
+            except (KeyboardInterrupt, Exception):
+                raise
     return processed_chunks
 
 
