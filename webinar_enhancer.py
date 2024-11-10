@@ -226,7 +226,7 @@ def analyze_audio(TEMP_VIDEO_DIR, offset_dB, input_path, save_name=None, get_non
     try:
         process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, universal_newlines=True)
         threading.Thread(target=ffmpeg_progress,
-                         args=(process, video_duration, f"Searching silence for {save_name}")).start()
+                         args=(process, video_duration, f"Searching for silence in {save_name}")).start()
         with open(log_file_path, 'w', encoding='utf-8') as log_file:
             while True:
                 line = process.stderr.readline()
@@ -494,7 +494,7 @@ def remove_silence_using_metadata(input_path, output_path, TEMP_VIDEO_DIR):
     ]
     try:
         process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, universal_newlines=True)
-        message = f"Removing silence for {os.path.basename(input_path)}"
+        message = f"Removing silence from {os.path.basename(input_path)}"
         ffmpeg_progress(process, calculate_remaining_duration(non_silence_intervals), message)
     except (KeyboardInterrupt, subprocess.CalledProcessError) as e:
         process.terminate()
