@@ -246,7 +246,8 @@ def analyze_audio(TEMP_VIDEO_DIR, offset_dB, input_path, save_name=None, get_non
                 if silence_intervals and silence_intervals[-1][1] is None:
                     silence_intervals[-1] = (silence_intervals[-1][0], start_time)
         if start_time is not None and video_duration - start_time > 5:
-            non_silence_intervals.append((start_time, video_duration))
+            if start_time != video_duration:
+                non_silence_intervals.append((start_time, video_duration))
         intervals = non_silence_intervals if get_non_silence else silence_intervals
         with open(intervals_file_path, 'w', encoding='utf-8') as f:
             json.dump(intervals, f)
