@@ -242,7 +242,8 @@ def analyze_audio(TEMP_VIDEO_DIR, offset_dB, input_path, save_name=None, get_non
             start_match = re.search(r'silence_start:\s*([\d.]+)', line)
             if start_match:
                 end_time = float(start_match.group(1))
-                non_silence_intervals.append((start_time, end_time))
+                if start_time != end_time:
+                    non_silence_intervals.append((start_time, end_time))
                 silence_intervals.append((end_time, None))
             end_match = re.search(r'silence_end:\s*([\d.]+)', line)
             if end_match:
