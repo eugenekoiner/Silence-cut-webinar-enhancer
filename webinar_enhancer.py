@@ -18,12 +18,14 @@ import pycountry
 from translate import Translator
 import srt
 
+
 def install_and_import(package):
     try:
         __import__(package)
     except ImportError:
         print(f"Installing {package}...")
         subprocess.check_call([sys.executable, "-m", "pip", "install", package])
+
 
 video_path = None
 speed_factor = None
@@ -56,6 +58,7 @@ final_video_path = None
 final_srt_path = None
 video_file_name = None
 continue_counter = 0
+
 
 def initialize_params():
     global silence_gap, offset_dB, speed_factor, need_transcription, source_language, model_name, need_translation, translation_language, result_bitrate
@@ -130,6 +133,7 @@ def clear_cache():
             except Exception as e:
                 print(f'Error {path}: {e}')
                 raise
+
 
 def load_model():
     device = "cuda" if torch.cuda.is_available() else "cpu"
@@ -679,13 +683,11 @@ def main():
         start_time = time.time()
         final_video_path = os.path.join(OUTPUT_DIR, os.path.splitext(video_file_name)[0] + "_output.mp4")
         final_srt_path = os.path.join(OUTPUT_DIR, os.path.splitext(video_file_name)[0] + "_output.srt")
-        if os.path.exists(final_video_path) and os.path.exists(final_srt_path):
+        if os.path.exists(final_video_path) and (
+                os.path.exists(final_srt_path) if need_transcription == 'yes' else True):
             print(f"Final file {os.path.basename(final_video_path)} is already exists")
             return
-
         os.makedirs(TEMP_VIDEO_DIR, exist_ok=True)
-
-
         temp_no_silence_video = os.path.join(TEMP_VIDEO_DIR,
                                              f'{os.path.splitext(video_file_name)[0]}_final_no_silence.mp4')
         print('Video duration', datetime.timedelta(seconds=int(get_video_duration_in_seconds(video_path))))
