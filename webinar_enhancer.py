@@ -56,6 +56,31 @@ final_video_path = None
 final_srt_path = None
 video_file_name = None
 continue_counter = 0
+SUPPORTED_VIDEO_EXTENSIONS = ('.mp4', '.mkv', '.avi', '.mov', '.webm')
+
+
+def parse_file_input(user_input):
+    """
+    Парсит ввод пользователя и возвращает список файлов для обработки.
+    - 'all' → все видеофайлы из SOURCE_DIR
+    - 'file1.mp4, file2.mp4' → список указанных файлов
+    - 'file.mp4' → список из одного файла
+    """
+    user_input = user_input.strip()
+
+    if user_input.lower() == 'all':
+        files = [f for f in os.listdir(SOURCE_DIR)
+                 if f.lower().endswith(SUPPORTED_VIDEO_EXTENSIONS)]
+        if not files:
+            raise FileNotFoundError("No video files found in .source folder")
+        return sorted(files)
+
+    if ',' in user_input:
+        files = [f.strip() for f in user_input.split(',') if f.strip()]
+        return files
+
+    return [user_input]
+
 
 def initialize_params():
     global speed_factor, offset_dB, silence_gap, result_bitrate, need_transcription, source_language, model_name, need_translation, translation_language
@@ -657,66 +682,133 @@ def speed_up_video(input_path, output_path, speed_factor):
         raise
 
 
+def process_single_video(file_name):
+    """Обрабатывает один видеофайл."""
+    global video_path, TEMP_VIDEO_DIR, temp_no_silence_video, final_video_path, final_srt_path, video_file_name
+
+    video_file_name = file_name
+    video_path = os.path.join(SOURCE_DIR, video_file_name)
+
+    if not os.path.exists(video_path):
+        raise FileNotFoundError(f"File '{video_file_name}' not found in .source folder")
+
+    TEMP_VIDEO_DIR = os.path.join(TEMP_DIR, os.path.splitext(video_file_name)[0])
+    clear_cache()
+    start_time = time.time()
+    original_duration = get_video_duration_in_seconds(video_path)
+
+    final_video_path = os.path.join(OUTPUT_DIR, os.path.splitext(video_file_name)[0] + "_output.mp4")
+    final_srt_path = os.path.join(OUTPUT_DIR, os.path.splitext(video_file_name)[0] + "_output.srt")
+
+    if os.path.exists(final_video_path):
+        if need_transcription != 'yes' or os.path.exists(final_srt_path):
+            print(f"[SKIP] {video_file_name} — already processed")
+            return
+
+    os.makedirs(TEMP_VIDEO_DIR, exist_ok=True)
+
+    temp_no_silence_video = os.path.join(TEMP_VIDEO_DIR,
+                                         f'{os.path.splitext(video_file_name)[0]}_final_no_silence.mp4')
+
+    print(f'\n{"="*60}')
+    print(f'Processing: {video_file_name}')
+    print(f'Duration: {datetime.timedelta(seconds=int(original_duration))}')
+    print(f'{"="*60}')
+
+    if original_duration > 20 * 60:
+        video_chunks = get_chunks(silence=False)
+        if not video_chunks:
+            aprox_silence_intervals = analyze_audio(TEMP_VIDEO_DIR, offset_dB, video_path, get_non_silence=False)
+            split_points = split_video_on_silence(video_path, aprox_silence_intervals)
+            video_chunks = split_video_by_points(video_path, split_points)
+        get_silence_threshold_for_chunks()
+        get_chunks_non_silence_intervals()
+        remove_silence_from_chunks(video_chunks)
+        if not os.path.exists(os.path.join(OUTPUT_DIR, final_srt_path)) and need_transcription == 'yes':
+            transcribe_all_chunks()
+            concatenate_srt_files()
+        concatenate_chunks()
+    else:
+        analyze_audio(TEMP_VIDEO_DIR, offset_dB, video_path)
+        remove_silence_using_metadata(video_path, temp_no_silence_video, TEMP_VIDEO_DIR)
+        if not os.path.exists(os.path.join(OUTPUT_DIR, final_srt_path)) and need_transcription == 'yes':
+            transcribe_all_chunks()
+            concatenate_srt_files()
+
+    if speed_factor != 1:
+        speed_up_video(temp_no_silence_video, final_video_path, speed_factor)
+        result_video_path = final_video_path
+    else:
+        result_video_path = os.path.join(OUTPUT_DIR, f"{os.path.splitext(video_file_name)[0]}_processed.mp4")
+        os.rename(temp_no_silence_video, result_video_path)
+
+    end_time = time.time()
+    elapsed_time = end_time - start_time
+    formatted_time = time.strftime("%H:%M:%S", time.gmtime(elapsed_time))
+
+    # Статистика сокращения длительности
+    result_duration = get_video_duration_in_seconds(result_video_path)
+    saved_seconds = original_duration - result_duration
+    saved_percent = (saved_seconds / original_duration) * 100
+
+    print(f"[DONE] {video_file_name} — processed in {formatted_time}")
+    print(f"       Original: {datetime.timedelta(seconds=int(original_duration))} → "
+          f"Result: {datetime.timedelta(seconds=int(result_duration))} "
+          f"(saved {saved_percent:.1f}%)")
+
+
 def main():
     initialize_params()
     required_packages = ["torch", "whisper", "tqdm", "translate", "srt"]
     for package in required_packages:
         install_and_import(package)
-    global video_path
-    global TEMP_VIDEO_DIR
-    global temp_no_silence_video
-    global final_video_path
-    global final_srt_path
-    global video_file_name
+
+    prompt = (
+        "Enter file name(s) to process:\n"
+        "  - Single file: video.mp4\n"
+        "  - Multiple files: video1.mp4, video2.mp4\n"
+        "  - All files in .source: all\n"
+        "> "
+    )
+
     try:
-        video_file_name = input("Enter the name of the source file (with extension): ")
-        video_path = os.path.join(SOURCE_DIR, video_file_name)
-        if not os.path.exists(video_path):
-            raise FileNotFoundError("File has not been found. Check the name and path in the .source folder")
-        TEMP_VIDEO_DIR = os.path.join(TEMP_DIR, os.path.splitext(video_file_name)[0])
-        clear_cache()
-        start_time = time.time()
-        final_video_path = os.path.join(OUTPUT_DIR, os.path.splitext(video_file_name)[0] + "_output.mp4")
-        final_srt_path = os.path.join(OUTPUT_DIR, os.path.splitext(video_file_name)[0] + "_output.srt")
-        if os.path.exists(final_video_path) and os.path.exists(final_srt_path):
-            print(f"Final file {os.path.basename(final_video_path)} is already exists")
-            return
+        user_input = input(prompt)
+        files_to_process = parse_file_input(user_input)
 
-        os.makedirs(TEMP_VIDEO_DIR, exist_ok=True)
+        total_files = len(files_to_process)
+        print(f"\nFiles to process: {total_files}")
 
+        processed = 0
+        failed = []
 
-        temp_no_silence_video = os.path.join(TEMP_VIDEO_DIR,
-                                             f'{os.path.splitext(video_file_name)[0]}_final_no_silence.mp4')
-        print('Video duration', datetime.timedelta(seconds=int(get_video_duration_in_seconds(video_path))))
-        if get_video_duration_in_seconds(video_path) > 20 * 60:
-            video_chunks = get_chunks(silence=False)
-            if not video_chunks:
-                aprox_silence_intervals = analyze_audio(TEMP_VIDEO_DIR, offset_dB, video_path, get_non_silence=False)
-                split_points = split_video_on_silence(video_path, aprox_silence_intervals)
-                video_chunks = split_video_by_points(video_path, split_points)
-            get_silence_threshold_for_chunks()
-            get_chunks_non_silence_intervals()
-            remove_silence_from_chunks(video_chunks)
-            if not os.path.exists(os.path.join(OUTPUT_DIR, final_srt_path)) and need_transcription == 'yes':
-                transcribe_all_chunks()
-                concatenate_srt_files()
-            concatenate_chunks()
-        else:
-            analyze_audio(TEMP_VIDEO_DIR, offset_dB, video_path)
-            remove_silence_using_metadata(video_path, temp_no_silence_video, TEMP_VIDEO_DIR)
-            if not os.path.exists(os.path.join(OUTPUT_DIR, final_srt_path)) and need_transcription == 'yes':
-                transcribe_all_chunks()
-                concatenate_srt_files()
-        if speed_factor != 1:
-            speed_up_video(temp_no_silence_video, final_video_path, speed_factor)
-        else:
-            output_path = os.path.join(OUTPUT_DIR, f"{os.path.splitext(video_file_name)[0]}_processed.mp4")
-            os.rename(temp_no_silence_video, output_path)
-        print("Done!")
-        end_time = time.time()
-        elapsed_time = end_time - start_time
-        formatted_time = time.strftime("%H:%M:%S", time.gmtime(elapsed_time))
-        print(f"Time taken to process the video file: {formatted_time}")
+        total_start_time = time.time()
+
+        for i, file_name in enumerate(files_to_process, 1):
+            print(f"\n[{i}/{total_files}] Starting: {file_name}")
+            try:
+                process_single_video(file_name)
+                processed += 1
+            except FileNotFoundError as e:
+                print(f"[ERROR] {file_name}: {e}")
+                failed.append(file_name)
+            except Exception as e:
+                print(f"[ERROR] {file_name}: {e}")
+                traceback.print_exc()
+                failed.append(file_name)
+
+        total_end_time = time.time()
+        total_elapsed = total_end_time - total_start_time
+        total_formatted = time.strftime("%H:%M:%S", time.gmtime(total_elapsed))
+
+        print(f"\n{'='*60}")
+        print("SUMMARY")
+        print(f"{'='*60}")
+        print(f"Total files: {total_files}")
+        print(f"Processed: {processed}")
+        if failed:
+            print(f"Failed: {len(failed)} — {', '.join(failed)}")
+        print(f"Total time: {total_formatted}")
+
     except KeyboardInterrupt:
         print("\nInterrupted by user")
     except FileNotFoundError as e:

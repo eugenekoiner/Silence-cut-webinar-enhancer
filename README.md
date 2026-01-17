@@ -11,6 +11,7 @@ By trimming out unnecessary pauses and speeding up the video (at least 1.25x), t
 - **Transcription Support**: Optionally transcribes video audio using Whisper for subtitles or text search.**
 - **Customizable**: Easily adjust settings like speed, silence threshold, and transcription via a configuration file.
 - **Resumption of Interrupted Process**: If the process is interrupted, the script can resume from where it left off.
+- **Batch Processing**: Process multiple files at once — enter file names separated by commas, or type `all` to process every video in the `.source` folder.
 - **Automatic Cache Management**: When processing a new file, the script clears the cache from previous runs (for resumption). Cache can be kept if you want to use it for further processing, such as adding transcription.
 - **Easy Setup**: Automatically creates necessary directories and configuration file on first run.
 
@@ -64,7 +65,19 @@ For videos longer than 20 minutes, the script uses ffmpeg to detect the longest 
 
 ## How to use and customize
 
-When you run the script for the first time, it will not find a configuration file and will prompt you to create one by asking a series of questions in the console. These questions allow you to customize various settings, such as the video speed, silence threshold, and whether transcription is required. 
+When you run the script for the first time, it will not find a configuration file and will prompt you to create one by asking a series of questions in the console. These questions allow you to customize various settings, such as the video speed, silence threshold, and whether transcription is required.
+
+### Processing Files
+
+When the script starts, you'll see a prompt asking for file names. You have three options:
+
+1. **Single file**: Enter the file name with extension (e.g., `lecture.mp4`)
+2. **Multiple files**: Enter file names separated by commas (e.g., `lecture1.mp4, lecture2.mp4, lecture3.mp4`)
+3. **All files**: Type `all` to process every video file in the `.source` folder
+
+The script will process files sequentially and display a summary at the end showing how many files were processed, failed, or skipped (already processed files are automatically skipped).
+
+### Configuration
 
 You can adjust the following parameters:
 - **Speed Adjustment**: Set the desired speed factor for the video (default is 1.25 for a slight speedup, set to 1 if no speed adjustment is needed).
