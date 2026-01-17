@@ -402,7 +402,7 @@ def concatenate_chunks():
             f"Couldn't find video files using template {os.path.splitext(video_file_name)[0]}_chunk_*_no_silence.mp4 in {TEMP_VIDEO_DIR}")
     concat_file_path = os.path.join(TEMP_VIDEO_DIR, f'{os.path.splitext(video_file_name)[0]}_concat_list.txt')
     if not os.path.exists(concat_file_path):
-        with open(concat_file_path, 'w', encoding='cp1251') as concat_file:
+        with open(concat_file_path, 'w', encoding='utf-8') as concat_file:
             for chunk in video_chunks:
                 concat_file.write(f"file '{chunk}'\n")
     command = [
